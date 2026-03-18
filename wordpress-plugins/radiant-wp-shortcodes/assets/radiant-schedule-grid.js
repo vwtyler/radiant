@@ -91,23 +91,29 @@
     const params = query || {};
 
     if (proxyUrl) {
-      const url = new URL(proxyUrl, window.location.origin);
-      url.searchParams.set("action", "radiant_wp_proxy");
-      url.searchParams.set("radiant_path", path);
-      Object.entries(params).forEach(([key, value]) => {
-        if (value != null && value !== "") url.searchParams.set(key, String(value));
-      });
+      try {
+        const url = new URL(proxyUrl, window.location.origin);
+        url.searchParams.set("action", "radiant_wp_proxy");
+        url.searchParams.set("radiant_path", path);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value != null && value !== "") url.searchParams.set(key, String(value));
+        });
 
-      const response = await fetch(url.toString(), { headers: { Accept: "application/json" } });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload || payload.success !== true) {
-        const message =
-          (payload && payload.data && payload.data.message) ||
-          (payload && payload.message) ||
-          "Failed to fetch.";
-        throw new Error(message);
+        const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin" });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload || payload.success !== true) {
+          const message =
+            (payload && payload.data && payload.data.message) ||
+            (payload && payload.message) ||
+            `Proxy request failed (${response.status})`;
+          throw new Error(message);
+        }
+        return payload.data;
+      } catch (proxyError) {
+        if (!apiBaseUrl) {
+          throw proxyError;
+        }
       }
-      return payload.data;
     }
 
     if (!apiBaseUrl) throw new Error("Radiant API Base URL is not configured.");
