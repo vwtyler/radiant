@@ -24,6 +24,7 @@ const acrCallbackSecret = process.env.ACRCLOUD_CALLBACK_SECRET || "";
 const acrCallbackToken = process.env.ACRCLOUD_CALLBACK_TOKEN || "";
 const acrDedupeSeconds = Number(process.env.ACRCLOUD_DEDUPE_SECONDS || 120);
 const acrExpectedProjectId = String(process.env.ACRCLOUD_EXPECTED_PROJECT_ID || "").trim();
+const radiantAdminToken = process.env.RADIANT_ADMIN_TOKEN || "";
 
 let directusToken = null;
 
@@ -51,6 +52,17 @@ function parseClockToMinutes(input) {
   if (hour === 12) hour = 0;
   if (meridiem === "pm") hour += 12;
   return hour * 60 + minute;
+}
+
+function formatMinutesToTime(minutes) {
+  const safe = clampNumber(Math.round(minutes), 0, 24 * 60);
+  const hour = String(Math.floor(safe / 60) % 24).padStart(2, "0");
+  const minute = String(safe % 60).padStart(2, "0");
+  return `${hour}:${minute}`;
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function toDateOnlyString(parts) {
@@ -218,6 +230,47 @@ async function directusCreateItem(collection, payload, retry = true) {
   }
   const json = await res.json();
   return json?.data || null;
+}
+
+async function directusUpdateItem(collection, id, payload, retry = true) {
+  const token = await directusAuth();
+  const res = await fetch(`${directusBaseUrl}/items/${collection}/${id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 401 && retry) {
+    directusToken = null;
+    return directusUpdateItem(collection, id, payload, false);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Directus update failed ${res.status} for ${collection}/${id}: ${text}`);
+  }
+  const json = await res.json();
+  return json?.data || null;
+}
+
+async function directusDeleteItem(collection, id, retry = true) {
+  const token = await directusAuth();
+  const res = await fetch(`${directusBaseUrl}/items/${collection}/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (res.status === 401 && retry) {
+    directusToken = null;
+    return directusDeleteItem(collection, id, false);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Directus delete failed ${res.status} for ${collection}/${id}: ${text}`);
+  }
+  return true;
 }
 
 async function getShowsByIds(showIds) {
@@ -606,6 +659,605 @@ function isValidAcrCallbackAuth(req, requestUrl) {
   return false;
 }
 
+function isValidAdminRequest(req) {
+  if (!radiantAdminToken) return false;
+  const supplied = req.headers["x-radiant-admin-token"];
+  if (typeof supplied !== "string") return false;
+  return timingSafeEqualText(supplied, radiantAdminToken);
+}
+
+function validateScheduleSlotPayload(input, existing = null) {
+  const weekday = input.weekday == null ? existing?.weekday : Number(input.weekday);
+  const startTime = input.start_time == null ? existing?.start_time : String(input.start_time);
+  const endTime = input.end_time == null ? existing?.end_time : String(input.end_time);
+  const timezone = input.timezone == null ? existing?.timezone : String(input.timezone);
+  const show = input.show == null ? existing?.show : Number(input.show);
+  const slotKey = input.slot_key == null ? existing?.slot_key : String(input.slot_key);
+
+  if (!Number.isInteger(Number(weekday)) || Number(weekday) < 1 || Number(weekday) > 7) {
+    throw new Error("weekday must be between 1 and 7");
+  }
+
+  const start = parseClockToMinutes(startTime);
+  const end = parseClockToMinutes(endTime);
+  if (start == null || end == null || end === start) {
+    throw new Error("start_time and end_time must be valid times");
+  }
+  if (end < start && end !== 0) {
+    throw new Error("end_time must be after start_time unless ending at 00:00");
+  }
+
+  if (!Number.isInteger(Number(show)) || Number(show) <= 0) {
+    throw new Error("show must be a valid show id");
+  }
+
+  return {
+    slot_key: slotKey || `${Number(weekday)}-${formatMinutesToTime(start)}-${formatMinutesToTime(end)}-${Date.now()}`,
+    weekday: Number(weekday),
+    start_time: formatMinutesToTime(start),
+    end_time: formatMinutesToTime(end),
+    timezone: timezone || defaultTimezone,
+    show: Number(show),
+  };
+}
+
+function parseDateParts(dateInput) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateInput || ""))) return null;
+  const [y, m, d] = String(dateInput).split("-").map(Number);
+  return { y, m, d };
+}
+
+function localDateTimeToIso(dateInput, timeInput, timezone) {
+  const date = parseDateParts(dateInput);
+  const minuteOfDay = parseClockToMinutes(timeInput);
+  if (!date || minuteOfDay == null) return null;
+
+  const h = Math.floor(minuteOfDay / 60);
+  const min = minuteOfDay % 60;
+  let guess = new Date(Date.UTC(date.y, date.m - 1, date.d, h, min, 0));
+
+  for (let i = 0; i < 4; i += 1) {
+    const parts = getZonedParts(guess, timezone);
+    const desiredStamp = Date.UTC(date.y, date.m - 1, date.d, h, min, 0);
+    const observedStamp = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      parts.hour,
+      parts.minute,
+      0,
+    );
+    const diff = desiredStamp - observedStamp;
+    if (diff === 0) break;
+    guess = new Date(guess.getTime() + diff);
+  }
+
+  return guess.toISOString();
+}
+
+async function createAlternatingOverrides(payload) {
+  const baseSlotId = Number(payload.base_slot_id);
+  const alternateShowId = Number(payload.alternate_show_id);
+  const startDate = String(payload.start_date || "");
+  const weeks = Math.max(1, Math.min(52, Number(payload.weeks || 12) || 12));
+  const intervalWeeks = Math.max(1, Math.min(8, Number(payload.interval_weeks || 2) || 2));
+
+  if (!Number.isInteger(baseSlotId) || baseSlotId <= 0) {
+    throw new Error("base_slot_id is required");
+  }
+  if (!Number.isInteger(alternateShowId) || alternateShowId <= 0) {
+    throw new Error("alternate_show_id is required");
+  }
+  if (!parseDateParts(startDate)) {
+    throw new Error("start_date must be YYYY-MM-DD");
+  }
+
+  const rows = await directusRequest("/items/schedule_slots", {
+    "filter[id][_eq]": String(baseSlotId),
+    fields: "id,weekday,start_time,end_time,timezone,show",
+    limit: "1",
+  });
+  const slot = rows[0] || null;
+  if (!slot) throw new Error("base slot not found");
+
+  const created = [];
+  for (let index = 0; index < weeks; index += intervalWeeks) {
+    const targetDate = shiftDate(startDate, index * 7);
+    const startIso = localDateTimeToIso(targetDate, slot.start_time, slot.timezone || defaultTimezone);
+    let endDate = targetDate;
+    if (parseClockToMinutes(slot.end_time) <= parseClockToMinutes(slot.start_time)) {
+      endDate = shiftDate(targetDate, 1);
+    }
+    const endIso = localDateTimeToIso(endDate, slot.end_time, slot.timezone || defaultTimezone);
+    if (!startIso || !endIso) continue;
+
+    const override = await directusCreateItem("schedule_overrides", {
+      start_at: startIso,
+      end_at: endIso,
+      override_type: "replacement",
+      show: alternateShowId,
+      note: `alternating override from slot ${baseSlotId}`,
+      priority: 100,
+      is_active: true,
+    });
+    created.push(override?.id || null);
+  }
+
+  return {
+    created_count: created.length,
+    override_ids: created.filter(Boolean),
+  };
+}
+
+function toCsv(rows) {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const value = cell == null ? "" : String(cell);
+          return `"${value.replace(/"/g, '""')}"`;
+        })
+        .join(","),
+    )
+    .join("\n");
+}
+
+function toPipeDelimited(rows) {
+  return rows
+    .map((row) => row.map((cell) => String(cell == null ? "" : cell).replace(/[\r\n|]+/g, " ").trim()).join("|"))
+    .join("\n");
+}
+
+function toCompactDate(value) {
+  const dt = value ? new Date(value) : new Date();
+  if (Number.isNaN(dt.getTime())) return "";
+  const day = String(dt.getUTCDate()).padStart(2, "0");
+  const month = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(dt.getUTCFullYear());
+  return `${day}${month}${year}`;
+}
+
+function toQuarterLabel(value) {
+  const dt = value ? new Date(value) : new Date();
+  if (Number.isNaN(dt.getTime())) return "";
+  const quarter = Math.floor(dt.getUTCMonth() / 3) + 1;
+  return `QTR${quarter}-${dt.getUTCFullYear()}`;
+}
+
+function toBmiDateTime(value) {
+  const dt = new Date(value || "");
+  if (Number.isNaN(dt.getTime())) return "";
+  const yyyy = String(dt.getUTCFullYear());
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  const hh = String(dt.getUTCHours()).padStart(2, "0");
+  const min = String(dt.getUTCMinutes()).padStart(2, "0");
+  const sec = String(dt.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${sec}`;
+}
+
+const REPORT_TYPES = [
+  {
+    id: "SOUND_EXCHANGE_ROU_ATP",
+    label: "SoundExchange - Report of Use - ATP (Commercial Webcaster)",
+    available: false,
+  },
+  {
+    id: "SOUND_EXCHANGE_ROU_ATH",
+    label: "SoundExchange - Report of Use - ATH (Minimum Fee Broadcaster)",
+    available: true,
+  },
+  {
+    id: "SOUND_EXCHANGE_SOA_ATP",
+    label: "SoundExchange - Statement of Account - ATP (Commercial Webcaster)",
+    available: false,
+  },
+  {
+    id: "SOUND_EXCHANGE_SOA_ATH",
+    label: "SoundExchange - Statement of Account - ATH (Minimum Fee Broadcaster)",
+    available: false,
+  },
+  {
+    id: "NPR_LISTENERS",
+    label: "NPR Digital Services - Listeners",
+    available: false,
+  },
+  {
+    id: "NPR_SONGS",
+    label: "NPR Digital Services - Songs",
+    available: false,
+  },
+  {
+    id: "BMI_MUSIC_PLAYS",
+    label: "BMI - Spreadsheet of Music Plays",
+    available: true,
+  },
+  {
+    id: "BMI_MUSIC_IMPRESSIONS",
+    label: "BMI - Number of Music Impressions",
+    available: false,
+  },
+];
+
+const REPORT_TYPE_MAP = Object.fromEntries(REPORT_TYPES.map((item) => [item.id, item]));
+
+async function buildReportExport(reportType, startDate, endDate) {
+  const baseFilter = {};
+  if (startDate) baseFilter["filter[played_at][_gte]"] = `${startDate}T00:00:00.000Z`;
+  if (endDate) baseFilter["filter[played_at][_lte]"] = `${endDate}T23:59:59.999Z`;
+
+  const tracks = await directusRequest("/items/playlist_tracks", {
+    fields: "id,played_at,artist,title,album,show",
+    sort: "played_at",
+    limit: "-1",
+    ...baseFilter,
+  });
+
+  if (reportType === "SOUND_EXCHANGE_ROU_ATH") {
+    const grouped = new Map();
+    for (const row of tracks) {
+      const artist = row.artist || "";
+      const title = row.title || "";
+      const isrc = "";
+      const album = row.album || "";
+      const label = "";
+      const key = [artist, title, isrc, album, label].join("\u0000");
+      const current = grouped.get(key) || {
+        artist,
+        title,
+        isrc,
+        album,
+        label,
+        playFrequency: 0,
+      };
+      current.playFrequency += 1;
+      grouped.set(key, current);
+    }
+
+    const body = [...grouped.values()]
+      .sort((a, b) => `${a.artist} ${a.title}`.localeCompare(`${b.artist} ${b.title}`))
+      .map((row) => ["", "B", row.artist, row.title, row.isrc, row.album, row.label, "0.00", "", row.playFrequency]);
+
+    const content = toPipeDelimited([
+      [
+        "NAME_OF_SERVICE",
+        "TRANSMISSION_CATEGORY",
+        "FEATURED_ARTIST",
+        "SOUND_RECORDING_TITLE",
+        "ISRC",
+        "ALBUM_TITLE",
+        "MARKETING_LABEL",
+        "AGGREGATE_TUNING_HOURS",
+        "CHANNEL_OR_PROGRAM_NAME",
+        "PLAY_FREQUENCY",
+      ],
+      ...body,
+    ]);
+
+    const startSource = startDate || tracks[0]?.played_at || new Date().toISOString();
+    const endSource = endDate || tracks[tracks.length - 1]?.played_at || new Date().toISOString();
+    return {
+      content,
+      filename: `${toCompactDate(startSource)}-${toCompactDate(endSource)}_B.txt`,
+      mimeType: "text/plain; charset=utf-8",
+    };
+  }
+
+  if (reportType === "BMI_MUSIC_PLAYS") {
+    const reportPeriod = toQuarterLabel(startDate || tracks[0]?.played_at || new Date().toISOString());
+    const rows = tracks.map((row, index) => [
+      reportPeriod,
+      row.id || index + 1,
+      row.title || "",
+      row.artist || "",
+      "",
+      toBmiDateTime(row.played_at),
+      "",
+    ]);
+    return {
+      content: toCsv([["Report Period", "ID", "Song Title", "Artist Name", "Writer", "Date Played", "ISRC"], ...rows]),
+      filename: `bmi_music_plays_${startDate || "start"}_${endDate || "end"}.csv`,
+      mimeType: "text/csv; charset=utf-8",
+    };
+  }
+
+  throw new Error("unsupported report_type");
+}
+
+async function buildAdminShows() {
+  const rows = await directusRequest("/items/shows", {
+    fields: "id,slug,title,show_type,is_active",
+    sort: "title",
+    limit: "-1",
+  });
+  return {
+    count: rows.length,
+    items: rows,
+  };
+}
+
+function validateAdminShowPayload(input, existing) {
+  const title = input.title == null ? existing.title : String(input.title).trim();
+  const slug = input.slug == null ? existing.slug : String(input.slug).trim();
+  const description = input.description == null ? existing.description : String(input.description);
+  const showType = input.show_type == null ? existing.show_type : String(input.show_type).trim();
+
+  if (!title) throw new Error("title is required");
+  if (!slug) throw new Error("slug is required");
+  if (!showType) throw new Error("show_type is required");
+
+  const allowed = new Set(["music", "talk", "mixed", "special"]);
+  if (!allowed.has(showType)) {
+    throw new Error("show_type must be one of: music, talk, mixed, special");
+  }
+
+  return {
+    title,
+    slug,
+    description,
+    show_type: showType,
+  };
+}
+
+function slugifyText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function validateAdminDjPayload(input, existing = null) {
+  const name = input.name == null ? existing?.name : String(input.name).trim();
+  const slugCandidate = input.slug == null ? existing?.slug : String(input.slug).trim();
+  const slug = slugifyText(slugCandidate || name);
+  const bio = input.bio == null ? existing?.bio : String(input.bio);
+  const imageUrl = input.image_url == null ? existing?.image_url : String(input.image_url);
+
+  if (!name) throw new Error("name is required");
+  if (!slug) throw new Error("slug is required");
+
+  return {
+    name,
+    slug,
+    bio,
+    image_url: imageUrl || null,
+    is_active: true,
+  };
+}
+
+async function buildAdminDjs() {
+  const rows = await directusRequest("/items/djs", {
+    fields: "id,slug,name,bio,image_url,is_active",
+    sort: "name",
+    limit: "-1",
+  });
+  return {
+    count: rows.length,
+    items: rows,
+  };
+}
+
+async function attachDjToShow(showId, djId, role = "host") {
+  const existing = await directusRequest("/items/show_djs", {
+    "filter[show][_eq]": String(showId),
+    "filter[dj][_eq]": String(djId),
+    fields: "id,role",
+    limit: "1",
+  });
+  if (existing[0]) {
+    const updated = await directusUpdateItem("show_djs", existing[0].id, { role: role || existing[0].role || "host" });
+    return { mode: "updated", item: updated };
+  }
+  const created = await directusCreateItem("show_djs", {
+    show: Number(showId),
+    dj: Number(djId),
+    role: role || "host",
+  });
+  return { mode: "created", item: created };
+}
+
+async function detachDjFromShow(showId, djId) {
+  const existing = await directusRequest("/items/show_djs", {
+    "filter[show][_eq]": String(showId),
+    "filter[dj][_eq]": String(djId),
+    fields: "id",
+    limit: "-1",
+  });
+
+  if (!existing.length) return { removed: 0 };
+
+  for (const row of existing) {
+    if (row?.id != null) {
+      await directusDeleteItem("show_djs", row.id);
+    }
+  }
+
+  return { removed: existing.length };
+}
+
+async function buildAdminScheduleSlots() {
+  const rows = await directusRequest("/items/schedule_slots", {
+    fields: "id,slot_key,weekday,start_time,end_time,timezone,show",
+    sort: "weekday,start_time",
+    limit: "-1",
+  });
+  const showIds = [...new Set(rows.map((row) => row.show).filter(Boolean))];
+  const showsById = await getShowsByIds(showIds);
+  return {
+    count: rows.length,
+    items: rows.map((row) => ({
+      id: row.id,
+      slot_key: row.slot_key || null,
+      weekday: Number(row.weekday),
+      start_time: row.start_time,
+      end_time: row.end_time,
+      timezone: row.timezone || defaultTimezone,
+      show: row.show,
+      show_data: safeShowSummary(showsById[row.show] || null),
+    })),
+  };
+}
+
+function compareBroadcastDesc(a, b) {
+  if (a.date_local !== b.date_local) return a.date_local < b.date_local ? 1 : -1;
+  return parseClockToMinutes(b.end_time) - parseClockToMinutes(a.end_time);
+}
+
+function buildRecentBroadcastsForSlots(slots, timezone, limit = 2) {
+  const now = new Date();
+  const zonedNow = getZonedParts(now, timezone);
+  const today = toDateOnlyString(zonedNow);
+  const results = [];
+
+  for (const slot of slots) {
+    const slotWeekday = Number(slot.weekday);
+    if (!Number.isInteger(slotWeekday) || slotWeekday < 1 || slotWeekday > 7) continue;
+
+    const daysBack = ((zonedNow.weekday || 1) - slotWeekday + 7) % 7;
+    const start = parseClockToMinutes(slot.start_time);
+    const rawEnd = parseClockToMinutes(slot.end_time);
+    if (start == null || rawEnd == null) continue;
+    const end = rawEnd > start ? rawEnd : rawEnd === 0 ? 24 * 60 : rawEnd;
+
+    for (const weekOffset of [0, 7, 14]) {
+      const dateLocal = shiftDate(today, -(daysBack + weekOffset));
+      const isToday = weekOffset === 0 && daysBack === 0;
+      if (isToday && zonedNow.minuteOfDay < end) continue;
+
+      results.push({
+        key: `${dateLocal}|${slot.start_time}|${slot.end_time}`,
+        date_local: dateLocal,
+        weekday: slotWeekday,
+        weekday_name: weekdayNames[slotWeekday - 1],
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        timezone,
+      });
+    }
+  }
+
+  results.sort(compareBroadcastDesc);
+  return results.slice(0, limit);
+}
+
+async function buildAdminShowInsights(showId) {
+  const id = Number(showId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+
+  const showRows = await directusRequest("/items/shows", {
+    "filter[id][_eq]": String(id),
+    fields: "id,slug,title,description,artwork_url,show_type",
+    limit: "1",
+  });
+  const show = showRows[0] || null;
+  if (!show) return null;
+
+  const slotRows = await directusRequest("/items/schedule_slots", {
+    "filter[show][_eq]": String(id),
+    fields: "id,weekday,start_time,end_time,timezone",
+    sort: "weekday,start_time",
+    limit: "-1",
+  });
+
+  const timezone = slotRows[0]?.timezone || defaultTimezone;
+  const recentBroadcasts = buildRecentBroadcastsForSlots(slotRows, timezone, 2);
+
+  const showDjs = await directusRequest("/items/show_djs", {
+    "filter[show][_eq]": String(id),
+    fields: "role,dj.id,dj.slug,dj.name,dj.bio,dj.image_url",
+    sort: "dj.name",
+    limit: "-1",
+  });
+
+  const tracks = await directusRequest("/items/playlist_tracks", {
+    "filter[show][_eq]": String(id),
+    fields: "id,played_at,artist,title,album,confidence,provider",
+    sort: "-played_at",
+    limit: "250",
+  });
+
+  const broadcastTracks = {};
+  for (const broadcast of recentBroadcasts) {
+    broadcastTracks[broadcast.key] = [];
+  }
+
+  for (const row of tracks) {
+    if (!row.played_at) continue;
+    const playedDate = new Date(row.played_at);
+    if (Number.isNaN(playedDate.getTime())) continue;
+    const playedParts = getZonedParts(playedDate, timezone);
+    const playedDateLocal = toDateOnlyString(playedParts);
+    const playedMinute = playedParts.minuteOfDay;
+
+    for (const broadcast of recentBroadcasts) {
+      if (broadcast.date_local !== playedDateLocal) continue;
+      const start = parseClockToMinutes(broadcast.start_time);
+      const endRaw = parseClockToMinutes(broadcast.end_time);
+      if (start == null || endRaw == null) continue;
+      const end = endRaw > start ? endRaw : endRaw === 0 ? 24 * 60 : endRaw;
+      if (playedMinute >= start && playedMinute < end) {
+        broadcastTracks[broadcast.key].push({
+          id: row.id,
+          played_at: row.played_at,
+          artist: row.artist || null,
+          title: row.title || null,
+          album: row.album || null,
+          confidence: row.confidence == null ? null : Number(row.confidence),
+          provider: row.provider || null,
+        });
+      }
+    }
+  }
+
+  const playlistByBroadcast = recentBroadcasts.map((broadcast) => ({
+    broadcast_key: broadcast.key,
+    tracks: (broadcastTracks[broadcast.key] || []).sort((a, b) =>
+      new Date(b.played_at).getTime() - new Date(a.played_at).getTime(),
+    ),
+  }));
+
+  return {
+    show: safeShowSummary(show),
+    djs: showDjs
+      .map((row) => ({
+        role: row.role || null,
+        dj: row.dj
+          ? {
+              id: row.dj.id,
+              slug: row.dj.slug,
+              name: row.dj.name,
+              bio: row.dj.bio || null,
+              image_url: row.dj.image_url || null,
+            }
+          : null,
+      }))
+      .filter((row) => row.dj),
+    weekly_slots: slotRows.map((row) => ({
+      id: row.id,
+      weekday: Number(row.weekday),
+      weekday_name: weekdayNames[Number(row.weekday) - 1] || null,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      timezone: row.timezone || timezone,
+    })),
+    recent_broadcasts: recentBroadcasts.map((item) => ({
+      ...item,
+      playlist_count: (broadcastTracks[item.key] || []).length,
+    })),
+    playlist_by_broadcast: playlistByBroadcast,
+    playlist_recent: tracks.map((row) => ({
+      id: row.id,
+      played_at: row.played_at,
+      artist: row.artist || null,
+      title: row.title || null,
+      album: row.album || null,
+      confidence: row.confidence == null ? null : Number(row.confidence),
+      provider: row.provider || null,
+    })),
+  };
+}
+
 function getClientIp(req) {
   const cfIp = req.headers["cf-connecting-ip"];
   if (typeof cfIp === "string" && cfIp.trim()) return cfIp.trim();
@@ -620,8 +1272,8 @@ function getCorsHeaders(req) {
   const requestOrigin = req.headers.origin;
   const headers = {
     Vary: "Origin",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-ACR-SECRET",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-ACR-SECRET, X-RADIANT-ADMIN-TOKEN",
     "Access-Control-Max-Age": "600",
   };
 
@@ -664,12 +1316,13 @@ const server = http.createServer((req, res) => {
   const corsHeaders = getCorsHeaders(req);
   const acrPath = `/${apiVersion}/acrcloud/callback`;
   const isAcrCallback = path === acrPath && req.method === "POST";
+  const isAdminPath = path.startsWith(`/${apiVersion}/admin/`);
 
   if (req.method === "OPTIONS") {
     return sendJson(res, 204, {}, corsHeaders);
   }
 
-  if (!isAcrCallback && isRateLimited(req)) {
+  if (!isAcrCallback && !isAdminPath && isRateLimited(req)) {
     return sendJson(
       res,
       429,
@@ -713,11 +1366,242 @@ const server = http.createServer((req, res) => {
           `/${apiVersion}/shows/:slug`,
           `/${apiVersion}/djs/:slug`,
           `/${apiVersion}/playlist/recent`,
+          `/${apiVersion}/admin/shows (internal)`,
+          `/${apiVersion}/admin/shows/:id/insights (internal)`,
+          `/${apiVersion}/admin/djs (internal)`,
+          `/${apiVersion}/admin/djs/:id (internal)`,
+          `/${apiVersion}/admin/shows/:id/djs (internal)`,
+          `/${apiVersion}/admin/shows/:id/djs/:djId (internal)`,
+          `/${apiVersion}/admin/schedule/slots (internal)`,
           `/${apiVersion}/acrcloud/callback (internal)`,
         ],
       },
       corsHeaders,
     );
+  }
+
+  if (path.startsWith(`/${apiVersion}/admin/`)) {
+    if (!isValidAdminRequest(req)) {
+      return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/shows` && req.method === "GET") {
+      const payload = await buildAdminShows();
+      return sendJson(res, 200, payload, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/reports/types` && req.method === "GET") {
+      return sendJson(
+        res,
+        200,
+        {
+          items: REPORT_TYPES.map((item) => ({
+            ...item,
+            status: item.available ? "ready" : "in_development",
+          })),
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/reports/generate` && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const reportType = String(body?.report_type || "").trim();
+      const startDate = body?.start_date ? String(body.start_date) : "";
+      const endDate = body?.end_date ? String(body.end_date) : "";
+      const reportTypeConfig = REPORT_TYPE_MAP[reportType];
+      if (!reportTypeConfig) {
+        return sendJson(res, 400, { error: "unsupported_report_type" }, corsHeaders);
+      }
+      if (!reportTypeConfig.available) {
+        return sendJson(
+          res,
+          400,
+          {
+            error: "report_in_development",
+            message: `${reportType} is currently in development and not yet available.`,
+          },
+          corsHeaders,
+        );
+      }
+
+      const report = await buildReportExport(reportType, startDate, endDate);
+      const fallbackExt = report?.mimeType && report.mimeType.includes("csv") ? "csv" : "txt";
+      const filename = report?.filename || `${reportType.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.${fallbackExt}`;
+      return sendJson(
+        res,
+        200,
+        {
+          report_type: reportType,
+          filename,
+          mime_type: report?.mimeType || "text/plain; charset=utf-8",
+          content: report?.content || "",
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/djs` && req.method === "GET") {
+      const payload = await buildAdminDjs();
+      return sendJson(res, 200, payload, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/djs` && req.method === "POST") {
+      const body = await readJsonBody(req);
+      let payload;
+      try {
+        payload = validateAdminDjPayload(body);
+      } catch (error) {
+        return sendJson(res, 400, { error: "invalid_payload", message: error.message }, corsHeaders);
+      }
+      const created = await directusCreateItem("djs", payload);
+      return sendJson(res, 201, { item: created }, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/djs/`) && req.method === "PATCH") {
+      const rawId = path.replace(`/${apiVersion}/admin/djs/`, "");
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return sendJson(res, 400, { error: "invalid_id" }, corsHeaders);
+      }
+      const rows = await directusRequest("/items/djs", {
+        "filter[id][_eq]": String(id),
+        fields: "id,name,slug,bio,image_url,is_active",
+        limit: "1",
+      });
+      const existing = rows[0] || null;
+      if (!existing) return sendJson(res, 404, { error: "not_found", id }, corsHeaders);
+
+      const body = await readJsonBody(req);
+      let payload;
+      try {
+        payload = validateAdminDjPayload(body, existing);
+      } catch (error) {
+        return sendJson(res, 400, { error: "invalid_payload", message: error.message }, corsHeaders);
+      }
+      const updated = await directusUpdateItem("djs", id, payload);
+      return sendJson(res, 200, { item: updated }, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/shows/`) && path.endsWith("/insights") && req.method === "GET") {
+      const rawId = path.replace(`/${apiVersion}/admin/shows/`, "").replace("/insights", "");
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return sendJson(res, 400, { error: "invalid_id" }, corsHeaders);
+      }
+      const payload = await buildAdminShowInsights(id);
+      if (!payload) return sendJson(res, 404, { error: "not_found", id }, corsHeaders);
+      return sendJson(res, 200, payload, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/shows/`) && path.endsWith("/djs") && req.method === "POST") {
+      const rawId = path.replace(`/${apiVersion}/admin/shows/`, "").replace("/djs", "");
+      const showId = Number(rawId);
+      if (!Number.isInteger(showId) || showId <= 0) {
+        return sendJson(res, 400, { error: "invalid_show_id" }, corsHeaders);
+      }
+      const body = await readJsonBody(req);
+      const djId = Number(body?.dj_id);
+      const role = body?.role ? String(body.role) : "host";
+      if (!Number.isInteger(djId) || djId <= 0) {
+        return sendJson(res, 400, { error: "invalid_dj_id" }, corsHeaders);
+      }
+      const attached = await attachDjToShow(showId, djId, role);
+      return sendJson(res, 200, attached, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/shows/`) && path.includes("/djs/") && req.method === "DELETE") {
+      const raw = path.replace(`/${apiVersion}/admin/shows/`, "");
+      const [showRaw, djRawWithPrefix] = raw.split("/djs/");
+      const showId = Number(showRaw);
+      const djId = Number(djRawWithPrefix);
+      if (!Number.isInteger(showId) || showId <= 0) {
+        return sendJson(res, 400, { error: "invalid_show_id" }, corsHeaders);
+      }
+      if (!Number.isInteger(djId) || djId <= 0) {
+        return sendJson(res, 400, { error: "invalid_dj_id" }, corsHeaders);
+      }
+      const result = await detachDjFromShow(showId, djId);
+      return sendJson(res, 200, { deleted: true, ...result }, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/shows/`) && req.method === "PATCH") {
+      const rawId = path.replace(`/${apiVersion}/admin/shows/`, "");
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return sendJson(res, 400, { error: "invalid_id" }, corsHeaders);
+      }
+      const rows = await directusRequest("/items/shows", {
+        "filter[id][_eq]": String(id),
+        fields: "id,title,slug,description,show_type",
+        limit: "1",
+      });
+      const existing = rows[0] || null;
+      if (!existing) return sendJson(res, 404, { error: "not_found", id }, corsHeaders);
+
+      const body = await readJsonBody(req);
+      let payload;
+      try {
+        payload = validateAdminShowPayload(body, existing);
+      } catch (error) {
+        return sendJson(res, 400, { error: "invalid_payload", message: error.message }, corsHeaders);
+      }
+      const updated = await directusUpdateItem("shows", id, payload);
+      return sendJson(res, 200, { item: updated }, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/schedule/slots` && req.method === "GET") {
+      const payload = await buildAdminScheduleSlots();
+      return sendJson(res, 200, payload, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/schedule/slots` && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const payload = validateScheduleSlotPayload(body);
+      const created = await directusCreateItem("schedule_slots", payload);
+      return sendJson(res, 201, { item: created }, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/schedule/alternating` && req.method === "POST") {
+      const body = await readJsonBody(req);
+      try {
+        const result = await createAlternatingOverrides(body);
+        return sendJson(res, 200, result, corsHeaders);
+      } catch (error) {
+        return sendJson(res, 400, { error: "invalid_payload", message: error.message }, corsHeaders);
+      }
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/schedule/slots/`) && req.method === "PATCH") {
+      const rawId = path.split(`/${apiVersion}/admin/schedule/slots/`)[1] || "";
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return sendJson(res, 400, { error: "invalid_id" }, corsHeaders);
+      }
+      const existingRows = await directusRequest("/items/schedule_slots", {
+        "filter[id][_eq]": String(id),
+        fields: "id,slot_key,weekday,start_time,end_time,timezone,show",
+        limit: "1",
+      });
+      const existing = existingRows[0] || null;
+      if (!existing) {
+        return sendJson(res, 404, { error: "not_found", id }, corsHeaders);
+      }
+      const body = await readJsonBody(req);
+      const payload = validateScheduleSlotPayload(body, existing);
+      const updated = await directusUpdateItem("schedule_slots", id, payload);
+      return sendJson(res, 200, { item: updated }, corsHeaders);
+    }
+
+    if (path.startsWith(`/${apiVersion}/admin/schedule/slots/`) && req.method === "DELETE") {
+      const rawId = path.split(`/${apiVersion}/admin/schedule/slots/`)[1] || "";
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return sendJson(res, 400, { error: "invalid_id" }, corsHeaders);
+      }
+      await directusDeleteItem("schedule_slots", id);
+      return sendJson(res, 200, { deleted: true, id }, corsHeaders);
+    }
   }
 
   if (isAcrCallback) {
