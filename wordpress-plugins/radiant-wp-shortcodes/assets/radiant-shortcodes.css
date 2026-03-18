@@ -61,6 +61,36 @@
   margin-top: 0.7rem;
 }
 
+.radiant-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(150px, 1fr));
+  gap: 0.55rem;
+}
+
+.radiant-day-card {
+  border: 1px solid #d7deeb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.5rem;
+}
+
+.radiant-day-card .radiant-time {
+  min-width: 0;
+  display: block;
+  width: 100%;
+  font-size: 0.86rem;
+}
+
+.radiant-day-card .radiant-item-title {
+  font-size: 0.92rem;
+}
+
+.radiant-empty {
+  margin: 0;
+  color: #5a6f8d;
+  font-size: 0.9rem;
+}
+
 .radiant-day h4 {
   margin: 0.15rem 0 0.35rem;
   font-size: 0.98rem;
@@ -80,6 +110,10 @@
 }
 
 @media (max-width: 640px) {
+  .radiant-week-grid {
+    grid-template-columns: 1fr;
+  }
+
   .radiant-time {
     min-width: 0;
   }

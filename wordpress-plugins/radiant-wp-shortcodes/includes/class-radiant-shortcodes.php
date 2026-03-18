@@ -139,7 +139,7 @@ class Radiant_Shortcodes
     {
         $atts = shortcode_atts([
             'tz' => self::default_timezone(),
-            'show_empty' => '0',
+            'show_empty' => '1',
         ], $atts, 'radiant_schedule_week');
 
         $data = Radiant_Api_Client::get_json('/v1/schedule', ['tz' => $atts['tz']]);
@@ -158,22 +158,28 @@ class Radiant_Shortcodes
         ob_start();
         ?>
         <div class="radiant-widget radiant-schedule-week">
-            <?php foreach ($days as $day): ?>
-                <?php if (empty($atts['show_empty']) && empty($day['slots'])) {
-                    continue;
-                } ?>
-                <section class="radiant-day">
-                    <h4><?php echo esc_html($day['weekday_name']); ?></h4>
-                    <ul class="radiant-list compact">
-                        <?php foreach ((array) $day['slots'] as $slot): ?>
-                            <li>
-                                <span class="radiant-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
-                                <span class="radiant-item-title"><?php echo esc_html(self::slot_show_title($slot)); ?></span>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                </section>
-            <?php endforeach; ?>
+            <div class="radiant-week-grid">
+                <?php foreach ($days as $day): ?>
+                    <?php if (empty($atts['show_empty']) && empty($day['slots'])) {
+                        continue;
+                    } ?>
+                    <section class="radiant-day-card">
+                        <h4><?php echo esc_html($day['weekday_name']); ?></h4>
+                        <?php if (!empty($day['slots'])): ?>
+                            <ul class="radiant-list compact">
+                                <?php foreach ((array) $day['slots'] as $slot): ?>
+                                    <li>
+                                        <span class="radiant-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
+                                        <span class="radiant-item-title"><?php echo esc_html(self::slot_show_title($slot)); ?></span>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php else: ?>
+                            <p class="radiant-empty">No scheduled slots</p>
+                        <?php endif; ?>
+                    </section>
+                <?php endforeach; ?>
+            </div>
         </div>
         <?php
         return ob_get_clean();

@@ -24,7 +24,7 @@ All shortcodes work with defaults. Attributes are optional.
   - `show_overrides="1"`
 - `radiant_schedule_week`
   - `tz="America/Los_Angeles"`
-  - `show_empty="0"`
+  - `show_empty="1"`
 - `radiant_playlist_recent`
   - `limit="10"`
 
