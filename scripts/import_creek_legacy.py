@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+"""Legacy migration importer from Creek APIs into Directus.
+
+This script is intended for one-time bootstrap/migration work only.
+Radiant's ongoing source of truth is Directus-managed data.
+"""
+
 import json
 import re
 import sys

@@ -54,12 +54,23 @@ Internal ingestion:
 
 Detailed deployment runbooks are available in `docs/deployment/`.
 
+Active operator runbooks are:
+
+- `docs/deployment/phase-1-runbook.md`
+- `docs/deployment/phase-2-runbook.md`
+- `docs/deployment/phase-5-runbook.md`
+
+Archived phase runbooks are in `docs/deployment/archive/`.
+
 ## Quickstart
 
 1. Copy environment template: `cp .env.example .env`
 2. Fill required values in `.env` (secrets, domain URLs, callback auth)
 3. Start services: `docker compose up -d --build`
-4. Seed schema/data: `python3 scripts/phase3_seed_directus.py`
+4. Populate station data in Directus:
+   - Manual entry in `Radiant Admin` for a fresh setup, or
+   - Import existing data if you already have it.
+   - Example legacy import from a JSON endpoint: `python3 scripts/import_creek_legacy.py`
 5. Verify API:
    - `curl -sS http://127.0.0.1:3000/healthz`
    - `curl -sS http://127.0.0.1:3000/v1/now-playing`
@@ -68,8 +79,9 @@ Detailed deployment runbooks are available in `docs/deployment/`.
 
 - `docker-compose.yml` - service orchestration
 - `services/radiant-api/src/server.js` - API/resolver/ingestion logic
-- `scripts/phase3_seed_directus.py` - schema + seed pipeline
-- `docs/deployment/` - staged deployment docs
+- `scripts/import_creek_legacy.py` - example one-time import from legacy JSON endpoints
+- `docs/deployment/` - active + archived deployment docs
+- `docs/migrations/` - migration notes and legacy import guidance
 
 ## Security notes
 

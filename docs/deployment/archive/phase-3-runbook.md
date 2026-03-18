@@ -26,7 +26,7 @@ Phase 3 sets up Directus collections, relations, and seed data using Creek APIs 
 ## Seed command
 
 ```bash
-python3 scripts/phase3_seed_directus.py
+python3 scripts/import_creek_legacy.py
 ```
 
 ## What the seed does
