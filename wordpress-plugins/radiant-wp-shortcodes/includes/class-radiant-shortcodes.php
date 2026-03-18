@@ -165,10 +165,10 @@ class Radiant_Shortcodes
                     } ?>
                     <section class="radiant-day-card">
                         <h4 class="radiant-day-title"><?php echo esc_html(self::short_weekday_label($day)); ?></h4>
-                        <div class="radiant-day-body">
-                            <?php for ($hour = 0; $hour <= 24; $hour++): ?>
-                                <div class="radiant-hour-line" style="top: <?php echo esc_attr((string) ($hour * 60 * self::week_px_per_minute())); ?>px;"></div>
-                            <?php endfor; ?>
+                        <div class="radiant-day-body" style="height: <?php echo esc_attr((string) self::week_day_body_height_px()); ?>px;">
+                            <?php foreach (self::week_hour_markers() as $markerMinute): ?>
+                                <div class="radiant-hour-line" style="top: <?php echo esc_attr((string) self::visual_minute_to_px($markerMinute)); ?>px;"></div>
+                            <?php endforeach; ?>
 
                             <?php if (!empty($day['slots'])): ?>
                                 <?php foreach ((array) $day['slots'] as $slot): ?>
@@ -339,7 +339,63 @@ class Radiant_Shortcodes
 
     private static function week_px_per_minute()
     {
-        return 0.6;
+        return 1.2;
+    }
+
+    private static function compressed_block_end_minutes()
+    {
+        return 7 * 60;
+    }
+
+    private static function compressed_block_visual_minutes()
+    {
+        return 60;
+    }
+
+    private static function visual_day_minutes()
+    {
+        return self::compressed_block_visual_minutes() + (24 * 60 - self::compressed_block_end_minutes());
+    }
+
+    private static function week_day_body_height_px()
+    {
+        return (int) round(self::visual_day_minutes() * self::week_px_per_minute());
+    }
+
+    private static function visual_minute($minute)
+    {
+        $minute = max(0, min(24 * 60, (int) $minute));
+        $compressedEnd = self::compressed_block_end_minutes();
+        $compressedVisual = self::compressed_block_visual_minutes();
+
+        if ($minute <= $compressedEnd) {
+            return ($minute / $compressedEnd) * $compressedVisual;
+        }
+
+        return $compressedVisual + ($minute - $compressedEnd);
+    }
+
+    private static function visual_minute_to_px($minute)
+    {
+        return (int) round(self::visual_minute($minute) * self::week_px_per_minute());
+    }
+
+    private static function visual_duration_minutes($startMinute, $durationMinutes)
+    {
+        $start = max(0, min(24 * 60, (int) $startMinute));
+        $end = max(0, min(24 * 60, $start + max(0, (int) $durationMinutes)));
+        $startVisual = self::visual_minute($start);
+        $endVisual = self::visual_minute($end);
+        return max(0, $endVisual - $startVisual);
+    }
+
+    private static function week_hour_markers()
+    {
+        $markers = [0, self::compressed_block_end_minutes()];
+        for ($hour = 8; $hour <= 24; $hour++) {
+            $markers[] = $hour * 60;
+        }
+        return $markers;
     }
 
     private static function slot_style($slot)
@@ -355,8 +411,8 @@ class Radiant_Shortcodes
             $duration = 30;
         }
 
-        $top = (int) round($start * self::week_px_per_minute());
-        $height = (int) round(max($duration * self::week_px_per_minute(), 26));
+        $top = self::visual_minute_to_px($start);
+        $height = (int) round(max(self::visual_duration_minutes($start, $duration) * self::week_px_per_minute(), 36));
 
         return 'top: ' . $top . 'px; height: ' . $height . 'px;';
     }
