@@ -165,18 +165,22 @@ class Radiant_Shortcodes
                     } ?>
                     <section class="radiant-day-card">
                         <h4 class="radiant-day-title"><?php echo esc_html(self::short_weekday_label($day)); ?></h4>
-                        <?php if (!empty($day['slots'])): ?>
-                            <ul class="radiant-list compact">
+                        <div class="radiant-day-body">
+                            <?php for ($hour = 0; $hour <= 24; $hour++): ?>
+                                <div class="radiant-hour-line" style="top: <?php echo esc_attr((string) ($hour * 60 * self::week_px_per_minute())); ?>px;"></div>
+                            <?php endfor; ?>
+
+                            <?php if (!empty($day['slots'])): ?>
                                 <?php foreach ((array) $day['slots'] as $slot): ?>
-                                    <li class="radiant-slot-card">
+                                    <article class="radiant-slot-card" style="<?php echo esc_attr(self::slot_style($slot)); ?>">
                                         <span class="radiant-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
                                         <span class="radiant-item-title"><?php echo esc_html(self::slot_show_title($slot)); ?></span>
-                                    </li>
+                                    </article>
                                 <?php endforeach; ?>
-                            </ul>
-                        <?php else: ?>
-                            <p class="radiant-empty">No scheduled slots</p>
-                        <?php endif; ?>
+                            <?php else: ?>
+                                <p class="radiant-empty">No scheduled slots</p>
+                            <?php endif; ?>
+                        </div>
                     </section>
                 <?php endforeach; ?>
             </div>
@@ -317,6 +321,44 @@ class Radiant_Shortcodes
             return 'Day';
         }
         return substr($fallback, 0, 3);
+    }
+
+    private static function parse_hhmm_minutes($time)
+    {
+        $parts = explode(':', (string) $time);
+        $h = isset($parts[0]) ? (int) $parts[0] : 0;
+        $m = isset($parts[1]) ? (int) $parts[1] : 0;
+        if ($h < 0 || $h > 24 || $m < 0 || $m > 59) {
+            return 0;
+        }
+        if ($h === 24) {
+            return 24 * 60;
+        }
+        return ($h * 60) + $m;
+    }
+
+    private static function week_px_per_minute()
+    {
+        return 0.34;
+    }
+
+    private static function slot_style($slot)
+    {
+        $start = self::parse_hhmm_minutes(isset($slot['start_time']) ? (string) $slot['start_time'] : '00:00');
+        $end = self::parse_hhmm_minutes(isset($slot['end_time']) ? (string) $slot['end_time'] : '00:00');
+
+        if ($end > $start) {
+            $duration = $end - $start;
+        } elseif ($end === 0 && $start > 0) {
+            $duration = (24 * 60) - $start;
+        } else {
+            $duration = 30;
+        }
+
+        $top = $start * self::week_px_per_minute();
+        $height = max($duration * self::week_px_per_minute(), 18);
+
+        return sprintf('top: %.2fpx; height: %.2fpx;', $top, $height);
     }
 
     private static function override_line($override)

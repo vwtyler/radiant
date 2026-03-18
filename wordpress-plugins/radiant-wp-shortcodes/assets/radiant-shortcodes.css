@@ -93,18 +93,39 @@
   background: linear-gradient(130deg, #eef3fb, #e7edf8);
 }
 
-.radiant-day-card .radiant-list {
-  padding: 0.45rem;
+.radiant-day-body {
+  position: relative;
+  height: calc(1440px * 0.34);
+  background: #f8fbff;
+  overflow: hidden;
+}
+
+.radiant-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed #d8e0ef;
 }
 
 .radiant-empty {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
   margin: 0;
-  padding: 0.65rem;
+  padding: 0.45rem;
   color: #5a6f8d;
   font-size: 0.9rem;
+  border: 1px dashed #d0dbeb;
+  border-radius: 7px;
+  background: #edf3fb;
 }
 
 .radiant-slot-card {
+  position: absolute;
+  left: 0.22rem;
+  right: 0.22rem;
   display: grid;
   gap: 0.18rem;
   border-radius: 8px;
@@ -147,6 +168,10 @@
 @media (max-width: 640px) {
   .radiant-week-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .radiant-day-body {
+    height: calc(1440px * 0.3);
   }
 
   .radiant-time {
