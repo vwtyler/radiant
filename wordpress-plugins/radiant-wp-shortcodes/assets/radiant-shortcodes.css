@@ -72,10 +72,11 @@
   border: 1px solid #cfd9e8;
   border-radius: 10px;
   background: #eff4fc;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 
 .radiant-day-title {
@@ -96,7 +97,7 @@
 .radiant-day-body {
   position: relative;
   background: #f8fbff;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .radiant-hour-line {
@@ -136,6 +137,10 @@
   padding: 0.32rem 0.35rem;
   overflow: visible;
   z-index: 2;
+}
+
+.radiant-schedule-week {
+  isolation: isolate;
 }
 
 .radiant-slot-card:focus {
