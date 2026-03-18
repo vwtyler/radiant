@@ -4,6 +4,7 @@ WordPress plugin that renders data from Radiant API endpoints using shortcodes.
 
 ## Included shortcodes
 
+- `[radiant_schedule_grid]` (admin-style read-only scheduler)
 - `[radiant_current_show]`
 - `[radiant_now_playing]` (alias of current show)
 - `[radiant_schedule_day]`
@@ -14,6 +15,11 @@ All shortcodes work with defaults. Attributes are optional.
 
 ## Optional attributes
 
+- `radiant_schedule_grid`
+  - `view="week"` (`week` or `day`, default `week`)
+  - `tz="America/Los_Angeles"`
+  - `show_toggle="1"`
+  - `show_live="1"`
 - `radiant_current_show`
   - `tz="America/Los_Angeles"`
   - `show_track="1"`
@@ -39,3 +45,4 @@ All shortcodes work with defaults. Attributes are optional.
 
 - Data is cached via WP transients (`Cache TTL` in settings).
 - Default plugin CSS can be disabled in settings if you want full theme control.
+- `radiant_schedule_grid` is read-only and includes click-through modal details (show, DJs, recent tracks).

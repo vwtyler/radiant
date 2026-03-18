@@ -8,6 +8,7 @@ class Radiant_Shortcodes
 {
     public static function init()
     {
+        add_shortcode('radiant_schedule_grid', [__CLASS__, 'shortcode_schedule_grid']);
         add_shortcode('radiant_current_show', [__CLASS__, 'shortcode_current_show']);
         add_shortcode('radiant_now_playing', [__CLASS__, 'shortcode_current_show']);
         add_shortcode('radiant_schedule_day', [__CLASS__, 'shortcode_schedule_day']);
@@ -20,11 +21,13 @@ class Radiant_Shortcodes
     public static function conditionally_enqueue_assets($posts)
     {
         $settings = Radiant_Settings::get();
-        if (empty($settings['load_css']) || !is_array($posts)) {
+        $loadCss = !empty($settings['load_css']);
+        if (!is_array($posts)) {
             return $posts;
         }
 
         $needles = [
+            '[radiant_schedule_grid',
             '[radiant_current_show',
             '[radiant_now_playing',
             '[radiant_schedule_day',
@@ -32,24 +35,85 @@ class Radiant_Shortcodes
             '[radiant_playlist_recent',
         ];
 
+        $found = false;
+        $foundGrid = false;
         foreach ($posts as $post) {
             if (!isset($post->post_content)) {
                 continue;
             }
             foreach ($needles as $needle) {
                 if (strpos($post->post_content, $needle) !== false) {
-                    wp_enqueue_style(
-                        'radiant-wp-shortcodes',
-                        RADIANT_WP_SHORTCODES_URL . 'assets/radiant-shortcodes.css',
-                        [],
-                        RADIANT_WP_SHORTCODES_VERSION
-                    );
-                    return $posts;
+                    $found = true;
+                    if ($needle === '[radiant_schedule_grid') {
+                        $foundGrid = true;
+                    }
                 }
             }
         }
 
+        if (!$found) {
+            return $posts;
+        }
+
+        if ($loadCss) {
+            wp_enqueue_style(
+                'radiant-wp-shortcodes',
+                RADIANT_WP_SHORTCODES_URL . 'assets/radiant-shortcodes.css',
+                [],
+                RADIANT_WP_SHORTCODES_VERSION
+            );
+        }
+
+        if ($foundGrid) {
+            wp_enqueue_script(
+                'radiant-wp-schedule-grid',
+                RADIANT_WP_SHORTCODES_URL . 'assets/radiant-schedule-grid.js',
+                [],
+                RADIANT_WP_SHORTCODES_VERSION,
+                true
+            );
+
+            $settings = Radiant_Settings::get();
+            wp_localize_script('radiant-wp-schedule-grid', 'radiantWpGridConfig', [
+                'apiBaseUrl' => isset($settings['api_base_url']) ? (string) $settings['api_base_url'] : '',
+                'defaultTimezone' => self::default_timezone(),
+            ]);
+        }
+
         return $posts;
+    }
+
+    public static function shortcode_schedule_grid($atts)
+    {
+        $atts = shortcode_atts([
+            'view' => 'week',
+            'tz' => self::default_timezone(),
+            'show_toggle' => '1',
+            'show_live' => '1',
+        ], $atts, 'radiant_schedule_grid');
+
+        $view = strtolower(trim((string) $atts['view'])) === 'day' ? 'day' : 'week';
+        $tz = trim((string) $atts['tz']);
+        if ($tz === '') {
+            $tz = self::default_timezone();
+        }
+
+        $instanceId = 'radiant-grid-' . wp_generate_password(8, false, false);
+
+        ob_start();
+        ?>
+        <div
+            id="<?php echo esc_attr($instanceId); ?>"
+            class="radiant-grid-root"
+            data-default-view="<?php echo esc_attr($view); ?>"
+            data-timezone="<?php echo esc_attr($tz); ?>"
+            data-show-toggle="<?php echo esc_attr(!empty($atts['show_toggle']) ? '1' : '0'); ?>"
+            data-show-live="<?php echo esc_attr(!empty($atts['show_live']) ? '1' : '0'); ?>"
+        >
+            <div class="radiant-grid-loading">Loading schedule...</div>
+        </div>
+        <?php
+        return ob_get_clean();
     }
 
     public static function shortcode_current_show($atts)

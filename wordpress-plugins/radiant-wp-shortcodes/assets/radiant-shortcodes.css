@@ -241,3 +241,234 @@
     grid-template-columns: 1fr;
   }
 }
+
+.radiant-grid-root {
+  margin: 0.8rem 0;
+}
+
+.radiant-grid-loading,
+.radiant-grid-error {
+  border: 1px solid #d7dde8;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #324968;
+  padding: 0.75rem;
+}
+
+.radiant-grid-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.radiant-grid-controls button,
+.radiant-grid-day-tabs button {
+  border: 1px solid #cfd9e8;
+  background: #f8fbff;
+  color: #2d4a71;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.42rem 0.66rem;
+}
+
+.radiant-grid-controls button.active,
+.radiant-grid-day-tabs button.active {
+  background: #e8eef8;
+  border-color: #9db0c9;
+}
+
+.radiant-grid-day-tabs {
+  display: none;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.radiant-grid-shell {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.radiant-grid-shell.day-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.radiant-grid-day {
+  border: 1px solid #cfd9e8;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #eff4fc;
+}
+
+.radiant-grid-day-header {
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #2e4a71;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid #d4deee;
+  background: linear-gradient(130deg, #eef3fb, #e7edf8);
+}
+
+.radiant-grid-day-body {
+  position: relative;
+  overflow: hidden;
+  background: #f8fbff;
+}
+
+.radiant-grid-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed #d8e0ef;
+}
+
+.radiant-grid-slot {
+  position: absolute;
+  left: 0.22rem;
+  right: 0.22rem;
+  border-radius: 8px;
+  border: 1px solid #2d568f;
+  background: linear-gradient(135deg, #2c5c9f, #3e74bc);
+  color: #f8fffd;
+  box-sizing: border-box;
+  display: grid;
+  gap: 0.16rem;
+  align-content: start;
+  padding: 0.3rem 0.34rem;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.radiant-grid-slot.is-live {
+  border-color: #9bd4ff;
+  box-shadow: 0 0 0 1px #9bd4ff inset;
+}
+
+.radiant-grid-slot-time {
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: #dbe8ff;
+}
+
+.radiant-grid-slot-title {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: #f8fffd;
+}
+
+.radiant-grid-empty {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  right: 0.55rem;
+  margin: 0;
+  border: 1px dashed #d0dbeb;
+  border-radius: 8px;
+  background: #edf3fb;
+  color: #5a6f8d;
+  font-size: 0.82rem;
+  padding: 0.45rem;
+}
+
+.radiant-grid-modal-open {
+  overflow: hidden;
+}
+
+.radiant-grid-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: #10192580;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.radiant-grid-modal {
+  width: min(720px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid #cfd9e8;
+  background: #ffffff;
+  box-shadow: 0 18px 40px #1120383d;
+  padding: 0.9rem 1rem;
+  position: relative;
+}
+
+.radiant-grid-modal-close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  border: none;
+  border-radius: 999px;
+  width: 1.8rem;
+  height: 1.8rem;
+  font-size: 1.2rem;
+  line-height: 1;
+  background: #edf3fb;
+  color: #2f4f75;
+}
+
+.radiant-grid-modal-title {
+  margin: 0 2rem 0.25rem 0;
+  font-size: 1.05rem;
+}
+
+.radiant-grid-modal-time {
+  margin: 0 0 0.7rem;
+  color: #4d6180;
+  font-size: 0.9rem;
+}
+
+.radiant-grid-modal-section h4 {
+  margin: 0.35rem 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.radiant-grid-modal-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.radiant-grid-modal-list li {
+  margin-bottom: 0.22rem;
+  font-size: 0.88rem;
+}
+
+.radiant-grid-muted {
+  margin: 0;
+  color: #607793;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 920px) {
+  .radiant-grid-shell {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .radiant-grid-day-tabs {
+    display: flex;
+  }
+}
+
+@media (max-width: 540px) {
+  .radiant-grid-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .radiant-grid-controls {
+    flex-wrap: wrap;
+  }
+}
