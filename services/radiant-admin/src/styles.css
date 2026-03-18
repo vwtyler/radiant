@@ -214,7 +214,7 @@ button.danger {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--card-strong);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .day-column.hidden-by-view {
@@ -234,7 +234,7 @@ button.danger {
 
 .day-body {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .hour-line {
@@ -255,8 +255,13 @@ button.danger {
   color: #f8fffd;
   padding: 0.35rem 0.45rem 0.8rem;
   cursor: grab;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 4px 12px #22344a2e;
+  z-index: 2;
+}
+
+.slot-card.menu-open {
+  z-index: 80 !important;
 }
 
 .slot-card h3 {
@@ -290,6 +295,7 @@ button.danger {
   display: flex;
   gap: 0.3rem;
   position: relative;
+  z-index: 30;
 }
 
 .slot-edit {
@@ -341,8 +347,12 @@ button.danger {
   border-radius: 9px;
   background: #f8fbff;
   box-shadow: 0 8px 20px #1a2d4430;
-  z-index: 8;
+  z-index: 40;
   overflow: hidden;
+}
+
+.slot-card.menu-open .slot-menu {
+  z-index: 90;
 }
 
 .slot-menu button {

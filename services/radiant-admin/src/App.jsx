@@ -1594,8 +1594,19 @@ export function App() {
                     return (
                       <article
                         key={slot.id}
-                        className={hasConflict ? "slot-card conflict" : "slot-card"}
-                        style={blockStyle(slot, sideBySide)}
+                        className={
+                          [
+                            "slot-card",
+                            hasConflict ? "conflict" : "",
+                            slotMenuId === slot.id ? "menu-open" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")
+                        }
+                        style={{
+                          ...blockStyle(slot, sideBySide),
+                          zIndex: slotMenuId === slot.id ? 80 : 2,
+                        }}
                         onPointerDown={(event) => beginDrag(event, slot, "move")}
                       >
                         <div className="slot-head">
