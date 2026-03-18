@@ -126,6 +126,8 @@
   position: absolute;
   left: 0.22rem;
   right: 0.22rem;
+  margin: 0;
+  box-sizing: border-box;
   display: grid;
   gap: 0.18rem;
   border-radius: 8px;

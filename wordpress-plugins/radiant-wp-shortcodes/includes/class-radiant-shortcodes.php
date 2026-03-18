@@ -355,10 +355,10 @@ class Radiant_Shortcodes
             $duration = 30;
         }
 
-        $top = $start * self::week_px_per_minute();
-        $height = max($duration * self::week_px_per_minute(), 26);
+        $top = (int) round($start * self::week_px_per_minute());
+        $height = (int) round(max($duration * self::week_px_per_minute(), 26));
 
-        return sprintf('top: %.2fpx; height: %.2fpx;', $top, $height);
+        return 'top: ' . $top . 'px; height: ' . $height . 'px;';
     }
 
     private static function override_line($override)
