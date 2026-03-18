@@ -26,6 +26,8 @@ Use this matrix to keep `dev`, `demo`, and `prod-like` aligned.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:8080` | `https://www.kaad-lp.org` | `https://www.kaad-lp.org` |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | `60000` | `60000` |
 | `RATE_LIMIT_MAX` | `120` | `120` | `120` |
+| `RADIANT_ADMIN_TOKEN` | local secret | demo secret | prod secret |
+| `RADIANT_ADMIN_API_BASE_URL` | `http://localhost:3000` | `https://kaad-api.tjackson.me` | `https://kaad-api.tjackson.me` |
 | `ACRCLOUD_CALLBACK_SECRET` | local secret | demo secret | prod secret |
 | `ACRCLOUD_CALLBACK_TOKEN` | local token | demo token | prod token |
 | `ACRCLOUD_DEDUPE_SECONDS` | `120` | `120` | `120` |
