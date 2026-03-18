@@ -7,5 +7,7 @@ Active operator runbooks are in `docs/deployment/`:
 - `phase-1-runbook.md`
 - `phase-2-runbook.md`
 - `phase-5-runbook.md`
+- `phase-6-runbook.md`
+- `phase-7-runbook.md`
 
 Archived docs are not the default operational path.

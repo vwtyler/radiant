@@ -1,0 +1,86 @@
+.radiant-widget {
+  border: 1px solid #d7dde8;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 0.9rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.radiant-title {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+}
+
+.radiant-subtitle {
+  margin: 0.6rem 0 0.35rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.radiant-show-name {
+  margin: 0;
+  font-size: 1.06rem;
+  font-weight: 600;
+}
+
+.radiant-track {
+  margin: 0.4rem 0 0;
+  color: #33435a;
+}
+
+.radiant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.radiant-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.radiant-time {
+  min-width: 8.8rem;
+  font-weight: 600;
+  color: #2d3f5d;
+}
+
+.radiant-item-title {
+  color: #0d1b2d;
+}
+
+.radiant-meta {
+  color: #4a5b74;
+  font-size: 0.9rem;
+}
+
+.radiant-day + .radiant-day {
+  margin-top: 0.7rem;
+}
+
+.radiant-day h4 {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 0.98rem;
+}
+
+.radiant-artwork {
+  display: block;
+  margin-top: 0.6rem;
+  max-width: 140px;
+  border-radius: 8px;
+}
+
+.radiant-error {
+  background: #fff4f4;
+  border-color: #f2c6c6;
+  color: #922d2d;
+}
+
+@media (max-width: 640px) {
+  .radiant-time {
+    min-width: 0;
+  }
+}

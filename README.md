@@ -1,157 +1,52 @@
 # Radiant
 
-Radiant is a self-hosted radio operations backend and admin app for managing schedules, shows, DJs, now-playing, playlist history, and operational exports.
+Radiant is a self-hosted **radi**o operations **a**ge**nt** platform for schedule management, now playing, playlist history, reporting exports, and WordPress-friendly display components.
 
-It runs separately from WordPress and exposes stable read APIs so station data can be rendered on a site without embedding broadcast logic in a theme or plugin.
+## Components
 
-The name is intentional but understated: Radio + Agent = Radiant.
+- `services/radiant-api/` - API service (public read endpoints + protected admin endpoints)
+- `services/radiant-admin/` - standalone scheduler/reporting web app
+- `wordpress-plugins/radiant-wp-shortcodes/` - WordPress shortcode plugin
 
-## What Radiant does today
+Each component has its own detailed README:
 
-- Runs a standalone schedule/admin UI for day-to-day station operations
-- Serves a public read API for schedule, now-playing, shows, DJs, and recent tracks
-- Resolves weekly schedule slots with support for overrides
-- Ingests ACRCloud callbacks for track recognition
-- Generates operational/export reports from tracked play history
+- `services/radiant-api/README.md`
+- `services/radiant-admin/README.md`
+- `wordpress-plugins/radiant-wp-shortcodes/README.md`
 
-## Project status
+## Current status
 
-- API + ingestion are live (Phases 1-5)
-- Phase 6 scheduler/admin app is live and actively used
-- WordPress integration remains a future phase
-
-## Current stack
-
-- Docker Compose (Ubuntu)
-- Directus (`radiant-cms`)
-- Standalone admin/scheduler web app (`radiant-admin`)
-- Node.js API service (`radiant-api`)
-- PostgreSQL
-- Cloudflare Tunnel (current deployment path)
-
-## Admin app (Phase 6) highlights
-
-The standalone admin app includes:
-
-- Schedule + Reporting tabs
-- Sun-first weekly schedule
-- Day/Week views with improved mobile defaults (Day mode on mobile)
-- Drag/resize schedule editing with staged changes and commit workflow
-- Alternating show support for same-slot alternating programs
-- Slot actions menu (`...`) with Edit Slot, Show Detail, and Delete Slot
-- Mobile day navigation improvements and day-state fixes
-- Compressed overnight timeline block (12:00 AM-7:00 AM visually condensed)
-
-## Reporting status
-
-### Available now (ready)
-
-- `SOUND_EXCHANGE_ROU_ATH`
-  - Pipe-delimited text export
-  - Transmission category `B`
-  - Filename style: `DDMMYYYY-DDMMYYYY_B.txt`
-- `BMI_MUSIC_PLAYS`
-  - CSV export matching station spreadsheet column structure
-
-### In development (disabled in UI)
-
-- `SOUND_EXCHANGE_ROU_ATP`
-- `SOUND_EXCHANGE_SOA_ATP`
-- `SOUND_EXCHANGE_SOA_ATH`
-- `NPR_LISTENERS`
-- `NPR_SONGS`
-- `BMI_MUSIC_IMPRESSIONS`
-
-## Core data model
-
-- `shows`
-- `djs`
-- `show_djs`
-- `schedule_slots` (weekly recurring baseline)
-- `schedule_overrides` (date-specific adjustments)
-- `playlist_tracks` (recognized/ingested track history)
-
-## Public API (`/v1`)
-
-Base URL example: `https://api.<your-domain>`
-
-- `GET /v1/now-playing`
-- `GET /v1/schedule`
-- `GET /v1/schedule/live`
-- `GET /v1/shows/:slug`
-- `GET /v1/djs/:slug`
-- `GET /v1/playlist/recent`
-
-Internal health:
-
-- `GET /healthz`
-- `GET /readyz`
-
-Internal ingestion:
-
-- `POST /v1/acrcloud/callback` (secured)
-
-## Admin API (protected)
-
-Used by the standalone admin app:
-
-- `GET /v1/admin/schedule/slots`
-- `POST /v1/admin/schedule/slots`
-- `PATCH /v1/admin/schedule/slots/:id`
-- `DELETE /v1/admin/schedule/slots/:id`
-- `GET /v1/admin/shows`
-- `GET /v1/admin/reports/types`
-- `POST /v1/admin/reports/generate`
+- Phases 1-6 are complete.
+- Phase 7 (WordPress integration) is started, including shortcode plugin MVP.
 
 ## Quickstart
 
 1. Copy environment template: `cp .env.example .env`
-2. Fill required values in `.env` (secrets, domain URLs, callback auth)
+2. Fill required values in `.env`
 3. Start services: `docker compose up -d --build`
-4. Populate station data in Directus:
-   - Manual entry in the CMS/admin collections, or
-   - Import existing data if available
-   - Example legacy import: `python3 scripts/import_creek_legacy.py`
-5. Verify API:
-   - `curl -sS http://127.0.0.1:3000/healthz`
-   - `curl -sS http://127.0.0.1:3000/v1/now-playing`
-6. Open admin app:
-   - `http://127.0.0.1:5173`
+4. Verify API health: `curl -sS http://127.0.0.1:3000/healthz`
+5. Open admin app: `http://127.0.0.1:5173`
 
 ## Key paths
 
 - `docker-compose.yml` - service orchestration
-- `services/radiant-admin/` - standalone admin/scheduler UI
-- `services/radiant-api/src/server.js` - API/resolver/ingestion/report logic
-- `scripts/import_creek_legacy.py` - one-time legacy data import example
-- `docs/deployment/` - active + archived deployment docs
-- `docs/migrations/` - migration notes and import guidance
+- `services/radiant-api/README.md` - API setup/endpoints/admin/report behavior
+- `services/radiant-admin/README.md` - admin app behavior, UX, reporting tab notes
+- `wordpress-plugins/radiant-wp-shortcodes/README.md` - plugin install and shortcode usage
+- `dist/radiant-wp-shortcodes.zip` - importable plugin archive
+- `docs/deployment/` - active runbooks
+- `docs/deployment/archive/` - archived runbooks
 
-## Deployment docs
-
-Detailed deployment runbooks are in `docs/deployment/`.
-
-Active runbooks:
+## Deployment runbooks
 
 - `docs/deployment/phase-1-runbook.md`
 - `docs/deployment/phase-2-runbook.md`
 - `docs/deployment/phase-5-runbook.md`
 - `docs/deployment/phase-6-runbook.md`
-
-Archived phase docs are in `docs/deployment/archive/`.
+- `docs/deployment/phase-7-runbook.md`
 
 ## Security notes
 
-- Keep real secrets in local `.env` only (do not commit)
-- Treat API/admin tokens as sensitive and rotate if exposed
-- Keep admin routes protected behind access controls
+- Keep secrets in local `.env` only (never commit live secrets)
+- Keep admin routes protected and rotate tokens when needed
 - Keep public API read-only and rate-limited
-
-## Deferred roadmap (not implemented yet)
-
-- Stats page:
-  - Icecast admin listener metrics
-  - Geo map of listener origin
-- Additional report formatting/compliance refinement
-- Admin auth feature:
-  - Evaluate Zero Trust vs local auth (given `kaad-lp.org` is not on Cloudflare)
