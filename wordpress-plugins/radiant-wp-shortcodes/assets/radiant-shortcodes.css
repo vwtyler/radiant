@@ -134,7 +134,14 @@
   background: linear-gradient(135deg, #2c5c9f, #3e74bc);
   color: #f8fffd;
   padding: 0.32rem 0.35rem;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 2;
+}
+
+.radiant-slot-card:focus {
+  outline: 2px solid #9cc0ff;
+  outline-offset: 1px;
+  z-index: 20;
 }
 
 .radiant-day-card .radiant-time {
@@ -152,6 +159,50 @@
   line-height: 1.2;
   color: #f8fffd;
   word-break: break-word;
+}
+
+.radiant-slot-tooltip {
+  position: absolute;
+  left: 50%;
+  top: -0.35rem;
+  transform: translate(-50%, -100%);
+  min-width: 140px;
+  max-width: 220px;
+  border: 1px solid #d4deee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #22344f;
+  box-shadow: 0 8px 20px #1f2f4724;
+  padding: 0.35rem 0.45rem;
+  display: grid;
+  gap: 0.14rem;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 25;
+}
+
+.radiant-tooltip-title {
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.radiant-tooltip-time {
+  color: #4d6180;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.radiant-slot-card:hover .radiant-slot-tooltip,
+.radiant-slot-card:focus .radiant-slot-tooltip,
+.radiant-slot-card:focus-within .radiant-slot-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.radiant-slot-card:hover {
+  z-index: 20;
 }
 
 .radiant-artwork {

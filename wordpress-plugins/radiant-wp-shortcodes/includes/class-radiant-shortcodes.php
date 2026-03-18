@@ -172,9 +172,13 @@ class Radiant_Shortcodes
 
                             <?php if (!empty($day['slots'])): ?>
                                 <?php foreach ((array) $day['slots'] as $slot): ?>
-                                    <article class="radiant-slot-card" style="<?php echo esc_attr(self::slot_style($slot)); ?>">
+                                    <article class="radiant-slot-card" style="<?php echo esc_attr(self::slot_style($slot)); ?>" tabindex="0">
                                         <span class="radiant-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
                                         <span class="radiant-item-title"><?php echo esc_html(self::slot_show_title($slot)); ?></span>
+                                        <span class="radiant-slot-tooltip" role="note">
+                                            <strong class="radiant-tooltip-title"><?php echo esc_html(self::slot_show_title($slot)); ?></strong>
+                                            <span class="radiant-tooltip-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
+                                        </span>
                                     </article>
                                 <?php endforeach; ?>
                             <?php else: ?>
