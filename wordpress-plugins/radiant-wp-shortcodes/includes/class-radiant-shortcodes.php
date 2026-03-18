@@ -158,17 +158,18 @@ class Radiant_Shortcodes
         ob_start();
         ?>
         <div class="radiant-widget radiant-schedule-week">
+            <div class="radiant-week-scroller">
             <div class="radiant-week-grid">
                 <?php foreach ($days as $day): ?>
                     <?php if (empty($atts['show_empty']) && empty($day['slots'])) {
                         continue;
                     } ?>
                     <section class="radiant-day-card">
-                        <h4><?php echo esc_html($day['weekday_name']); ?></h4>
+                        <h4 class="radiant-day-title"><?php echo esc_html($day['weekday_name']); ?></h4>
                         <?php if (!empty($day['slots'])): ?>
                             <ul class="radiant-list compact">
                                 <?php foreach ((array) $day['slots'] as $slot): ?>
-                                    <li>
+                                    <li class="radiant-slot-card">
                                         <span class="radiant-time"><?php echo esc_html(self::format_time_range($slot)); ?></span>
                                         <span class="radiant-item-title"><?php echo esc_html(self::slot_show_title($slot)); ?></span>
                                     </li>
@@ -179,6 +180,7 @@ class Radiant_Shortcodes
                         <?php endif; ?>
                     </section>
                 <?php endforeach; ?>
+            </div>
             </div>
         </div>
         <?php

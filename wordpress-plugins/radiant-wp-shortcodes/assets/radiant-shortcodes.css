@@ -63,37 +63,64 @@
 
 .radiant-week-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(150px, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(7, minmax(175px, 1fr));
+  gap: 0.65rem;
+}
+
+.radiant-week-scroller {
+  overflow-x: auto;
 }
 
 .radiant-day-card {
-  border: 1px solid #d7deeb;
+  border: 1px solid #cfd9e8;
   border-radius: 10px;
-  background: #fff;
-  padding: 0.5rem;
+  background: #eff4fc;
+  overflow: hidden;
+}
+
+.radiant-day-title {
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
+  color: #2e4a71;
+  border-bottom: 1px solid #d4deee;
+  background: linear-gradient(130deg, #eef3fb, #e7edf8);
+}
+
+.radiant-day-card .radiant-list {
+  padding: 0.45rem;
+}
+
+.radiant-empty {
+  margin: 0;
+  padding: 0.65rem;
+  color: #5a6f8d;
+  font-size: 0.9rem;
+}
+
+.radiant-slot-card {
+  display: grid;
+  gap: 0.18rem;
+  border-radius: 8px;
+  border: 1px solid #2d568f;
+  background: linear-gradient(135deg, #2c5c9f, #3e74bc);
+  color: #f8fffd;
+  padding: 0.45rem 0.48rem;
 }
 
 .radiant-day-card .radiant-time {
   min-width: 0;
   display: block;
   width: 100%;
-  font-size: 0.86rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #dbe8ff;
 }
 
 .radiant-day-card .radiant-item-title {
-  font-size: 0.92rem;
-}
-
-.radiant-empty {
-  margin: 0;
-  color: #5a6f8d;
-  font-size: 0.9rem;
-}
-
-.radiant-day h4 {
-  margin: 0.15rem 0 0.35rem;
-  font-size: 0.98rem;
+  font-size: 0.88rem;
+  color: #f8fffd;
 }
 
 .radiant-artwork {
