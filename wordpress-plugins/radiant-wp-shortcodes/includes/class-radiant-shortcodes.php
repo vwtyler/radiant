@@ -158,14 +158,13 @@ class Radiant_Shortcodes
         ob_start();
         ?>
         <div class="radiant-widget radiant-schedule-week">
-            <div class="radiant-week-scroller">
             <div class="radiant-week-grid">
                 <?php foreach ($days as $day): ?>
                     <?php if (empty($atts['show_empty']) && empty($day['slots'])) {
                         continue;
                     } ?>
                     <section class="radiant-day-card">
-                        <h4 class="radiant-day-title"><?php echo esc_html($day['weekday_name']); ?></h4>
+                        <h4 class="radiant-day-title"><?php echo esc_html(self::short_weekday_label($day)); ?></h4>
                         <?php if (!empty($day['slots'])): ?>
                             <ul class="radiant-list compact">
                                 <?php foreach ((array) $day['slots'] as $slot): ?>
@@ -180,7 +179,6 @@ class Radiant_Shortcodes
                         <?php endif; ?>
                     </section>
                 <?php endforeach; ?>
-            </div>
             </div>
         </div>
         <?php
@@ -297,6 +295,28 @@ class Radiant_Shortcodes
             return $time;
         }
         return $dt->format('g:i A');
+    }
+
+    private static function short_weekday_label($day)
+    {
+        $weekday = isset($day['weekday']) ? (int) $day['weekday'] : 0;
+        $map = [
+            1 => 'Mon',
+            2 => 'Tue',
+            3 => 'Wed',
+            4 => 'Thu',
+            5 => 'Fri',
+            6 => 'Sat',
+            7 => 'Sun',
+        ];
+        if (isset($map[$weekday])) {
+            return $map[$weekday];
+        }
+        $fallback = isset($day['weekday_name']) ? trim((string) $day['weekday_name']) : '';
+        if ($fallback === '') {
+            return 'Day';
+        }
+        return substr($fallback, 0, 3);
     }
 
     private static function override_line($override)
