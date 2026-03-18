@@ -1,0 +1,16 @@
+# Local environment files (keep templates only)
+.env
+.env.local
+.env.*.local
+
+# Allow committed template
+!.env.example
+
+# Common secret file patterns
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local secret directories
+secrets/

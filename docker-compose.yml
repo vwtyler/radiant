@@ -1,0 +1,97 @@
+name: radiant
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: radiant-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-radiant}
+      POSTGRES_USER: ${POSTGRES_USER:-radiant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-America/Los_Angeles}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiant} -d ${POSTGRES_DB:-radiant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  directus:
+    image: directus/directus:11.16.1
+    container_name: radiant-directus
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-America/Los_Angeles}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${POSTGRES_DB:-radiant}
+      DB_USER: ${POSTGRES_USER:-radiant}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KEY: ${DIRECTUS_KEY}
+      SECRET: ${DIRECTUS_SECRET}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
+      PUBLIC_URL: ${ADMIN_PUBLIC_URL:-http://localhost:1337}
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: ${WP_ORIGIN},${ADMIN_PUBLIC_URL}
+      WEBSOCKETS_ENABLED: "true"
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    ports:
+      - "0.0.0.0:1337:8055"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:8055/server/health',(res)=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  radiant-api:
+    build:
+      context: ./services/radiant-api
+      dockerfile: Dockerfile
+    container_name: radiant-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-America/Los_Angeles}
+      PORT: 3000
+      API_VERSION: v1
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECTUS_URL: ${DIRECTUS_URL:-http://directus:8055}
+      DIRECTUS_ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
+      DIRECTUS_ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
+      NOW_PLAYING_CONFIDENCE_MIN: ${NOW_PLAYING_CONFIDENCE_MIN:-0.80}
+      NOW_PLAYING_FRESH_SECONDS: ${NOW_PLAYING_FRESH_SECONDS:-30}
+      WP_ORIGIN: ${WP_ORIGIN}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://www.kaad-lp.org,http://localhost:8080}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      ACRCLOUD_CALLBACK_SECRET: ${ACRCLOUD_CALLBACK_SECRET}
+      ACRCLOUD_CALLBACK_TOKEN: ${ACRCLOUD_CALLBACK_TOKEN:-}
+      ACRCLOUD_DEDUPE_SECONDS: ${ACRCLOUD_DEDUPE_SECONDS:-120}
+      ACRCLOUD_EXPECTED_PROJECT_ID: ${ACRCLOUD_EXPECTED_PROJECT_ID:-}
+    ports:
+      - "0.0.0.0:3000:3000"
+
+volumes:
+  postgres_data:
+  directus_uploads:
+  directus_extensions:
