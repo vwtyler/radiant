@@ -2,6 +2,7 @@
   const cfg = window.radiantWpGridConfig || {};
   const apiBaseUrl = String(cfg.apiBaseUrl || "").replace(/\/$/, "");
   const defaultTimezone = String(cfg.defaultTimezone || "America/Los_Angeles");
+  const proxyUrl = String(cfg.proxyUrl || "");
 
   const DAYS = [
     { num: 7, label: "Sun" },
@@ -87,17 +88,39 @@
   }
 
   async function fetchJson(path, query) {
-    if (!apiBaseUrl) throw new Error("Radiant API Base URL is not configured.");
-    const url = new URL(path, `${apiBaseUrl}/`);
-    Object.entries(query || {}).forEach(([key, value]) => {
-      if (value != null && value !== "") url.searchParams.set(key, String(value));
-    });
-    const response = await fetch(url.toString(), { headers: { Accept: "application/json" } });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data && (data.message || data.error) ? data.message || data.error : "Request failed");
+    const params = query || {};
+
+    if (proxyUrl) {
+      const url = new URL(proxyUrl, window.location.origin);
+      url.searchParams.set("action", "radiant_wp_proxy");
+      url.searchParams.set("radiant_path", path);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value != null && value !== "") url.searchParams.set(key, String(value));
+      });
+
+      const response = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload || payload.success !== true) {
+        const message =
+          (payload && payload.data && payload.data.message) ||
+          (payload && payload.message) ||
+          "Failed to fetch.";
+        throw new Error(message);
+      }
+      return payload.data;
     }
-    return data;
+
+    if (!apiBaseUrl) throw new Error("Radiant API Base URL is not configured.");
+    const directUrl = new URL(path, `${apiBaseUrl}/`);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && value !== "") directUrl.searchParams.set(key, String(value));
+    });
+    const directResponse = await fetch(directUrl.toString(), { headers: { Accept: "application/json" } });
+    const directData = await directResponse.json().catch(() => ({}));
+    if (!directResponse.ok) {
+      throw new Error(directData && (directData.message || directData.error) ? directData.message || directData.error : "Request failed");
+    }
+    return directData;
   }
 
   function clearNode(node) {

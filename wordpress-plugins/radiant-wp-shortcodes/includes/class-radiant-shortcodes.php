@@ -16,6 +16,8 @@ class Radiant_Shortcodes
         add_shortcode('radiant_playlist_recent', [__CLASS__, 'shortcode_playlist_recent']);
 
         add_filter('the_posts', [__CLASS__, 'conditionally_enqueue_assets'], 20, 2);
+        add_action('wp_ajax_radiant_wp_proxy', [__CLASS__, 'ajax_proxy']);
+        add_action('wp_ajax_nopriv_radiant_wp_proxy', [__CLASS__, 'ajax_proxy']);
     }
 
     public static function conditionally_enqueue_assets($posts)
@@ -77,6 +79,7 @@ class Radiant_Shortcodes
             wp_localize_script('radiant-wp-schedule-grid', 'radiantWpGridConfig', [
                 'apiBaseUrl' => isset($settings['api_base_url']) ? (string) $settings['api_base_url'] : '',
                 'defaultTimezone' => self::default_timezone(),
+                'proxyUrl' => admin_url('admin-ajax.php'),
             ]);
         }
 
@@ -114,6 +117,52 @@ class Radiant_Shortcodes
         </div>
         <?php
         return ob_get_clean();
+    }
+
+    public static function ajax_proxy()
+    {
+        $path = isset($_GET['radiant_path']) ? wp_unslash((string) $_GET['radiant_path']) : '';
+        if (!self::is_allowed_proxy_path($path)) {
+            wp_send_json_error([
+                'message' => 'Unsupported API path.',
+            ], 400);
+        }
+
+        $query = $_GET;
+        unset($query['action'], $query['radiant_path']);
+
+        $payload = Radiant_Api_Client::get_json($path, $query);
+        if (is_wp_error($payload)) {
+            $status = 500;
+            $errorData = $payload->get_error_data();
+            if (is_array($errorData) && isset($errorData['status']) && is_numeric($errorData['status'])) {
+                $status = (int) $errorData['status'];
+            }
+
+            wp_send_json_error([
+                'message' => $payload->get_error_message(),
+            ], $status);
+        }
+
+        wp_send_json_success($payload);
+    }
+
+    private static function is_allowed_proxy_path($path)
+    {
+        $clean = trim((string) $path);
+        if ($clean === '') {
+            return false;
+        }
+
+        if (preg_match('#^/v1/(schedule|now-playing|playlist/recent)$#', $clean)) {
+            return true;
+        }
+
+        if (preg_match('#^/v1/shows/[A-Za-z0-9._~-]+$#', $clean)) {
+            return true;
+        }
+
+        return false;
     }
 
     public static function shortcode_current_show($atts)
