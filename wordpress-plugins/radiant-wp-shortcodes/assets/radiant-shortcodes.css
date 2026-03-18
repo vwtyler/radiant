@@ -66,6 +66,7 @@
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.42rem;
   align-items: stretch;
+  overflow: visible;
 }
 
 .radiant-day-card {
@@ -77,6 +78,12 @@
   flex-direction: column;
   min-width: 0;
   position: relative;
+  z-index: 1;
+}
+
+.radiant-day-card:hover,
+.radiant-day-card:focus-within {
+  z-index: 30;
 }
 
 .radiant-day-title {
@@ -146,7 +153,7 @@
 .radiant-slot-card:focus {
   outline: 2px solid #9cc0ff;
   outline-offset: 1px;
-  z-index: 20;
+  z-index: 60;
 }
 
 .radiant-day-card .radiant-time {
@@ -207,7 +214,7 @@
 }
 
 .radiant-slot-card:hover {
-  z-index: 20;
+  z-index: 60;
 }
 
 .radiant-artwork {

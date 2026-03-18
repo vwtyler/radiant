@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Radiant WP Shortcodes
  * Description: Shortcodes for current show, daily/weekly schedule, and recent playlist from Radiant API.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Author: Radiant
  * License: GPL-2.0-or-later
  */
@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('RADIANT_WP_SHORTCODES_VERSION', '0.1.0');
+define('RADIANT_WP_SHORTCODES_VERSION', '0.1.1');
 define('RADIANT_WP_SHORTCODES_FILE', __FILE__);
 define('RADIANT_WP_SHORTCODES_DIR', plugin_dir_path(__FILE__));
 define('RADIANT_WP_SHORTCODES_URL', plugin_dir_url(__FILE__));
