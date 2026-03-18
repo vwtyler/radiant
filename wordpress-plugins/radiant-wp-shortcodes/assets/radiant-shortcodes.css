@@ -95,7 +95,7 @@
 
 .radiant-day-body {
   position: relative;
-  height: calc(1440px * 0.34);
+  height: calc(1440px * 0.6);
   background: #f8fbff;
   overflow: hidden;
 }
@@ -133,6 +133,7 @@
   background: linear-gradient(135deg, #2c5c9f, #3e74bc);
   color: #f8fffd;
   padding: 0.32rem 0.35rem;
+  overflow: hidden;
 }
 
 .radiant-day-card .radiant-time {
@@ -168,10 +169,6 @@
 @media (max-width: 640px) {
   .radiant-week-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .radiant-day-body {
-    height: calc(1440px * 0.3);
   }
 
   .radiant-time {

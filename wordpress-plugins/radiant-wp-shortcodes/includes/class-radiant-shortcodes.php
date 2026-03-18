@@ -339,7 +339,7 @@ class Radiant_Shortcodes
 
     private static function week_px_per_minute()
     {
-        return 0.34;
+        return 0.6;
     }
 
     private static function slot_style($slot)
@@ -356,7 +356,7 @@ class Radiant_Shortcodes
         }
 
         $top = $start * self::week_px_per_minute();
-        $height = max($duration * self::week_px_per_minute(), 18);
+        $height = max($duration * self::week_px_per_minute(), 26);
 
         return sprintf('top: %.2fpx; height: %.2fpx;', $top, $height);
     }
