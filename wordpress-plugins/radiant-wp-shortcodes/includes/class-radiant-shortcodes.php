@@ -79,7 +79,8 @@ class Radiant_Shortcodes
             wp_localize_script('radiant-wp-schedule-grid', 'radiantWpGridConfig', [
                 'apiBaseUrl' => isset($settings['api_base_url']) ? (string) $settings['api_base_url'] : '',
                 'defaultTimezone' => self::default_timezone(),
-                'proxyUrl' => admin_url('admin-ajax.php'),
+                'proxyUrl' => admin_url('admin-ajax.php', 'relative'),
+                'proxyUrlAbsolute' => admin_url('admin-ajax.php'),
             ]);
         }
 

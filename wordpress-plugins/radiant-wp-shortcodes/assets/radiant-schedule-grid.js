@@ -3,6 +3,7 @@
   const apiBaseUrl = String(cfg.apiBaseUrl || "").replace(/\/$/, "");
   const defaultTimezone = String(cfg.defaultTimezone || "America/Los_Angeles");
   const proxyUrl = String(cfg.proxyUrl || "");
+  const proxyUrlAbsolute = String(cfg.proxyUrlAbsolute || "");
 
   const DAYS = [
     { num: 7, label: "Sun" },
@@ -107,7 +108,21 @@
   async function fetchJson(path, query) {
     const params = query || {};
 
-    if (proxyUrl) {
+    const proxyCandidates = [];
+    if (proxyUrl) proxyCandidates.push(proxyUrl);
+    if (proxyUrlAbsolute) proxyCandidates.push(proxyUrlAbsolute);
+    if (window.location && window.location.origin) {
+      proxyCandidates.push(`${window.location.origin}/wp-admin/admin-ajax.php`);
+    }
+
+    const seenProxyUrls = new Set();
+    const proxyErrors = [];
+
+    for (const candidate of proxyCandidates) {
+      const url = String(candidate || "").trim();
+      if (!url || seenProxyUrls.has(url)) continue;
+      seenProxyUrls.add(url);
+
       try {
         const body = new URLSearchParams();
         body.set("action", "radiant_wp_proxy");
@@ -116,7 +131,7 @@
           if (value != null && value !== "") body.set(key, String(value));
         });
 
-        const response = await fetch(proxyUrl, {
+        const response = await fetch(url, {
           method: "POST",
           headers: {
             Accept: "application/json",
@@ -136,23 +151,32 @@
         }
         return payload.data;
       } catch (proxyError) {
-        if (!apiBaseUrl) {
-          throw proxyError;
-        }
+        proxyErrors.push(proxyError && proxyError.message ? proxyError.message : "Proxy request failed");
       }
     }
 
-    if (!apiBaseUrl) throw new Error("Radiant API Base URL is not configured.");
-    const directUrl = new URL(path, `${apiBaseUrl}/`);
-    Object.entries(params).forEach(([key, value]) => {
-      if (value != null && value !== "") directUrl.searchParams.set(key, String(value));
-    });
-    const directResponse = await fetch(directUrl.toString(), { headers: { Accept: "application/json" } });
-    const directData = await directResponse.json().catch(() => ({}));
-    if (!directResponse.ok) {
-      throw new Error(directData && (directData.message || directData.error) ? directData.message || directData.error : "Request failed");
+    if (apiBaseUrl) {
+      try {
+        const directUrl = new URL(path, `${apiBaseUrl}/`);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value != null && value !== "") directUrl.searchParams.set(key, String(value));
+        });
+        const directResponse = await fetch(directUrl.toString(), { headers: { Accept: "application/json" } });
+        const directData = await directResponse.json().catch(() => ({}));
+        if (!directResponse.ok) {
+          throw new Error(directData && (directData.message || directData.error) ? directData.message || directData.error : "Request failed");
+        }
+        return directData;
+      } catch (directError) {
+        proxyErrors.push(directError && directError.message ? directError.message : "Direct API request failed");
+      }
     }
-    return directData;
+
+    if (!proxyErrors.length) {
+      throw new Error("Failed to fetch.");
+    }
+
+    throw new Error(proxyErrors[0]);
   }
 
   function clearNode(node) {
