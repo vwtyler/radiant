@@ -137,6 +137,89 @@ function normalizeText(value) {
     .replace(/\s+/g, " ");
 }
 
+function pickFirstText(values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function parseServiceTitleArtist(source) {
+  if (!source || typeof source !== "object") return null;
+
+  const title = pickFirstText([
+    source.title,
+    source.name,
+    source.track_title,
+    source.song,
+    source.song_title,
+    source.track_name,
+    source.video_title,
+    source.display_name,
+    source?.track?.name,
+    source?.track?.title,
+    source?.music?.title,
+    source?.music?.name,
+  ]);
+
+  const artist = pickFirstText([
+    source.artist,
+    source.artist_name,
+    source.performer,
+    source.singer,
+    source?.track?.artist,
+    source?.track?.artist_name,
+    source?.music?.artist,
+    source?.music?.artist_name,
+    Array.isArray(source.artists) ? source.artists.map((item) => item?.name || item).filter(Boolean).join(", ") : "",
+    Array.isArray(source?.track?.artists)
+      ? source.track.artists.map((item) => item?.name || item).filter(Boolean).join(", ")
+      : "",
+  ]);
+
+  if (!title || !artist) return null;
+  return { title, artist };
+}
+
+function resolveTrackFromExternalConsensus(topMatch) {
+  const external = topMatch?.external_metadata;
+  if (!external || typeof external !== "object") {
+    return null;
+  }
+
+  const candidates = [];
+  const serviceKeys = ["aha_music", "spotify", "youtube", "deezer"];
+  for (const key of serviceKeys) {
+    const parsed = parseServiceTitleArtist(external[key]);
+    if (!parsed) continue;
+    candidates.push({
+      service: key,
+      title: parsed.title,
+      artist: parsed.artist,
+      key: `${normalizeText(parsed.artist)}::${normalizeText(parsed.title)}`,
+    });
+  }
+
+  if (candidates.length < 2) return null;
+
+  const counts = new Map();
+  for (const item of candidates) {
+    const current = counts.get(item.key) || { count: 0, item };
+    current.count += 1;
+    counts.set(item.key, current);
+  }
+
+  const winner = [...counts.values()].sort((a, b) => b.count - a.count)[0] || null;
+  if (!winner || winner.count < 2) return null;
+
+  return {
+    artist: winner.item.artist,
+    title: winner.item.title,
+    agreed_services: candidates.filter((row) => row.key === winner.item.key).map((row) => row.service),
+  };
+}
+
 function toIsoUtc(timestampUtc) {
   if (!timestampUtc || typeof timestampUtc !== "string") return null;
   const trimmed = timestampUtc.trim();
@@ -614,11 +697,19 @@ async function ingestAcrcloudPayload(payload) {
   }
 
   const top = music[0] || {};
-  const artist = (top.artists || []).map((a) => a?.name).filter(Boolean).join(", ") || null;
-  const title = top.title || null;
-  if (!artist || !title) {
+  const rawArtist = (top.artists || []).map((a) => a?.name).filter(Boolean).join(", ") || "";
+  const rawTitle = String(top.title || "").trim();
+  if (!rawArtist || !rawTitle) {
     return { inserted: false, reason: "missing_artist_or_title" };
   }
+
+  const consensus = resolveTrackFromExternalConsensus(top);
+  const topKey = `${normalizeText(rawArtist)}::${normalizeText(rawTitle)}`;
+  const consensusKey = consensus ? `${normalizeText(consensus.artist)}::${normalizeText(consensus.title)}` : "";
+  const useConsensus = Boolean(consensus && consensusKey && consensusKey !== topKey);
+
+  const artist = useConsensus ? consensus.artist : rawArtist;
+  const title = useConsensus ? consensus.title : rawTitle;
 
   const score = Number(top.score || 0);
   const confidence = Math.max(0, Math.min(1, score / 100));
@@ -661,8 +752,12 @@ async function ingestAcrcloudPayload(payload) {
 
   return {
     inserted: true,
-    reason: "inserted",
+    reason: useConsensus ? "inserted_consensus_override" : "inserted",
     id: created?.id || null,
+    corrected: useConsensus,
+    corrected_from: useConsensus ? { artist: rawArtist, title: rawTitle } : null,
+    corrected_to: useConsensus ? { artist, title } : null,
+    corrected_services: useConsensus ? consensus.agreed_services : [],
   };
 }
 
