@@ -1258,6 +1258,21 @@ async function buildAdminShowInsights(showId) {
   };
 }
 
+async function buildShowInsightsBySlug(slug) {
+  const cleanSlug = String(slug || "").trim();
+  if (!cleanSlug) return null;
+
+  const showRows = await directusRequest("/items/shows", {
+    "filter[slug][_eq]": cleanSlug,
+    fields: "id",
+    limit: "1",
+  });
+  const show = showRows[0] || null;
+  if (!show?.id) return null;
+
+  return buildAdminShowInsights(show.id);
+}
+
 function getClientIp(req) {
   const cfIp = req.headers["cf-connecting-ip"];
   if (typeof cfIp === "string" && cfIp.trim()) return cfIp.trim();
@@ -1697,6 +1712,17 @@ const server = http.createServer((req, res) => {
       },
       corsHeaders,
     );
+  }
+
+  if (path.startsWith(`/${apiVersion}/shows/`) && path.endsWith("/insights") && req.method === "GET") {
+    const prefix = `/${apiVersion}/shows/`;
+    const suffix = "/insights";
+    const rawSlug = path.slice(prefix.length, -suffix.length);
+    const slug = decodeURIComponent(rawSlug || "").trim();
+    if (!slug || slug.includes("/")) return sendJson(res, 400, { error: "invalid_slug" }, corsHeaders);
+    const payload = await buildShowInsightsBySlug(slug);
+    if (!payload) return sendJson(res, 404, { error: "not_found", slug }, corsHeaders);
+    return sendJson(res, 200, payload, corsHeaders);
   }
 
   if (path.startsWith(`/${apiVersion}/shows/`) && req.method === "GET") {

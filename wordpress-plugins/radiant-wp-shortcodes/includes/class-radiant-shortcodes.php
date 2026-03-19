@@ -162,6 +162,10 @@ class Radiant_Shortcodes
             return true;
         }
 
+        if (preg_match('#^/v1/shows/[A-Za-z0-9._~-]+/insights$#', $clean)) {
+            return true;
+        }
+
         return false;
     }
 

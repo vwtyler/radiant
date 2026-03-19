@@ -45,4 +45,4 @@ All shortcodes work with defaults. Attributes are optional.
 
 - Data is cached via WP transients (`Cache TTL` in settings).
 - Default plugin CSS can be disabled in settings if you want full theme control.
-- `radiant_schedule_grid` is read-only and includes click-through modal details (show, DJs, recent tracks).
+- `radiant_schedule_grid` is read-only and includes click-through modal details (show, DJs, recent airings, and per-airing playlists).

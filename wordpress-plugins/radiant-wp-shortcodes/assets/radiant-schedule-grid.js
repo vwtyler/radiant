@@ -74,6 +74,22 @@
     return `${formatTime(start)} - ${formatTime(end)}`;
   }
 
+  function formatDateLabel(dateLocal) {
+    const raw = String(dateLocal || "").trim();
+    if (!raw) return "";
+    const date = new Date(`${raw}T12:00:00Z`);
+    if (Number.isNaN(date.getTime())) return raw;
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+  }
+
+  function formatAiringLabel(airing) {
+    const weekday = String(airing.weekday_name || "").trim();
+    const date = formatDateLabel(airing.date_local);
+    const start = formatTime(parseHHMM(airing.start_time));
+    const end = formatTime(parseHHMM(airing.end_time));
+    return `${weekday} ${date} · ${start} - ${end}`.trim();
+  }
+
   function getTodayWeekdayNum(timezone) {
     try {
       const parts = new Intl.DateTimeFormat("en-US", {
@@ -207,6 +223,7 @@
 
     const title = el("h3", "radiant-grid-modal-title", state.title || "Show Details");
     const time = el("p", "radiant-grid-modal-time", state.time || "");
+
     const djWrap = el("div", "radiant-grid-modal-section");
     djWrap.appendChild(el("h4", "", "DJs"));
     if (state.djs && state.djs.length) {
@@ -217,24 +234,92 @@
       djWrap.appendChild(el("p", "radiant-grid-muted", "No DJs listed."));
     }
 
+    const airingsWrap = el("div", "radiant-grid-modal-section");
+    const airingsTitle = el("h4", "", "Recent Airings");
+    airingsWrap.appendChild(airingsTitle);
+
     const tracksWrap = el("div", "radiant-grid-modal-section");
-    tracksWrap.appendChild(el("h4", "", "Recent Tracks"));
-    if (state.tracks && state.tracks.length) {
-      const ul = el("ul", "radiant-grid-modal-list");
-      state.tracks.forEach((track) => {
-        const li = el("li");
-        li.textContent = `${track.artist || "Unknown Artist"} - ${track.title || "Unknown Track"}`;
-        ul.appendChild(li);
+    const playlistTitle = el("h4", "", "Playlist");
+    tracksWrap.appendChild(playlistTitle);
+
+    const airings = Array.isArray(state.airings) ? state.airings : [];
+    const tracksByAiring = state.tracksByAiring && typeof state.tracksByAiring === "object" ? state.tracksByAiring : {};
+
+    if (airings.length) {
+      const airingButtons = el("div", "radiant-grid-airings");
+      const tracksList = el("ul", "radiant-grid-modal-list");
+      const tracksEmpty = el("p", "radiant-grid-muted", "No tracks found for this airing.");
+
+      let selectedKey = airings[0].key;
+
+      function updateButtons() {
+        const buttons = airingButtons.querySelectorAll("button");
+        buttons.forEach((button) => {
+          if (button.getAttribute("data-airing-key") === selectedKey) button.classList.add("active");
+          else button.classList.remove("active");
+        });
+      }
+
+      function renderTracks() {
+        clearNode(tracksList);
+        const activeAiring = airings.find((item) => item.key === selectedKey) || null;
+        const activeTracks = Array.isArray(tracksByAiring[selectedKey]) ? tracksByAiring[selectedKey] : [];
+        playlistTitle.textContent = `Playlist${activeAiring ? ` · ${activeAiring.label}` : ""}`;
+
+        if (!activeTracks.length) {
+          tracksList.style.display = "none";
+          tracksEmpty.style.display = "block";
+          return;
+        }
+
+        tracksList.style.display = "block";
+        tracksEmpty.style.display = "none";
+        activeTracks.forEach((track) => {
+          const li = el("li");
+          li.textContent = `${track.artist || "Unknown Artist"} - ${track.title || "Unknown Track"}`;
+          tracksList.appendChild(li);
+        });
+      }
+
+      airings.forEach((airing) => {
+        const btn = el("button", "radiant-grid-airing-btn", airing.label || "Airing");
+        btn.type = "button";
+        btn.setAttribute("data-airing-key", airing.key);
+        btn.addEventListener("click", () => {
+          selectedKey = airing.key;
+          updateButtons();
+          renderTracks();
+        });
+        airingButtons.appendChild(btn);
       });
-      tracksWrap.appendChild(ul);
+
+      updateButtons();
+      renderTracks();
+
+      airingsWrap.appendChild(airingButtons);
+      tracksWrap.appendChild(tracksList);
+      tracksWrap.appendChild(tracksEmpty);
     } else {
-      tracksWrap.appendChild(el("p", "radiant-grid-muted", "No recent tracks found for this show."));
+      airingsWrap.appendChild(el("p", "radiant-grid-muted", "No recent airings found."));
+
+      if (state.tracks && state.tracks.length) {
+        const ul = el("ul", "radiant-grid-modal-list");
+        state.tracks.forEach((track) => {
+          const li = el("li");
+          li.textContent = `${track.artist || "Unknown Artist"} - ${track.title || "Unknown Track"}`;
+          ul.appendChild(li);
+        });
+        tracksWrap.appendChild(ul);
+      } else {
+        tracksWrap.appendChild(el("p", "radiant-grid-muted", "No recent tracks found for this show."));
+      }
     }
 
     modal.appendChild(close);
     modal.appendChild(title);
     modal.appendChild(time);
     modal.appendChild(djWrap);
+    modal.appendChild(airingsWrap);
     modal.appendChild(tracksWrap);
     overlay.appendChild(modal);
     return overlay;
@@ -258,22 +343,47 @@
       };
     }
 
-    const [showPayload, recentPayload] = await Promise.all([
-      fetchJson(`/v1/shows/${encodeURIComponent(show.slug)}`, { tz: timezone }),
-      fetchJson("/v1/playlist/recent", { limit: 200 }),
-    ]);
+    const insights = await fetchJson(`/v1/shows/${encodeURIComponent(show.slug)}/insights`, { tz: timezone });
 
-    const djs = Array.isArray(showPayload.djs) ? showPayload.djs.map((dj) => dj && dj.name).filter(Boolean) : [];
-    const items = Array.isArray(recentPayload.items) ? recentPayload.items : [];
-    const tracks = items
-      .filter((item) => item && item.show && item.show.slug === show.slug)
-      .slice(0, 25)
-      .map((item) => ({ artist: item.artist || "", title: item.title || "" }));
+    const djs = Array.isArray(insights.djs)
+      ? insights.djs
+          .map((row) => (row && row.dj && row.dj.name ? row.dj.name : ""))
+          .filter(Boolean)
+      : [];
+
+    const recentBroadcasts = Array.isArray(insights.recent_broadcasts) ? insights.recent_broadcasts : [];
+    const playlistByBroadcast = Array.isArray(insights.playlist_by_broadcast) ? insights.playlist_by_broadcast : [];
+
+    const tracksByAiring = {};
+    playlistByBroadcast.forEach((bucket) => {
+      if (!bucket || !bucket.broadcast_key) return;
+      tracksByAiring[bucket.broadcast_key] = Array.isArray(bucket.tracks)
+        ? bucket.tracks.map((track) => ({
+            artist: track && track.artist ? track.artist : "",
+            title: track && track.title ? track.title : "",
+          }))
+        : [];
+    });
+
+    const airings = recentBroadcasts.map((airing) => ({
+      key: airing.key,
+      label: formatAiringLabel(airing),
+      playlistCount: Number(airing.playlist_count || 0),
+    }));
+
+    const fallbackTracks = Array.isArray(insights.playlist_recent)
+      ? insights.playlist_recent.slice(0, 25).map((track) => ({
+          artist: track && track.artist ? track.artist : "",
+          title: track && track.title ? track.title : "",
+        }))
+      : [];
 
     const details = {
-      title: (showPayload.show && showPayload.show.title) || show.title || "Show",
+      title: (insights.show && insights.show.title) || show.title || "Show",
       djs,
-      tracks,
+      airings,
+      tracksByAiring,
+      tracks: fallbackTracks,
     };
 
     showDetailsCache.set(show.slug, details);

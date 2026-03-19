@@ -447,6 +447,30 @@
   font-size: 0.88rem;
 }
 
+.radiant-grid-airings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.radiant-grid-airing-btn {
+  border: 1px solid #cbd8ea;
+  border-radius: 999px;
+  background: #f7fbff;
+  color: #2f4f75;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  padding: 0.35rem 0.55rem;
+  max-width: 100%;
+}
+
+.radiant-grid-airing-btn.active {
+  border-color: #2d568f;
+  background: #e6eef9;
+  color: #204067;
+}
+
 .radiant-grid-muted {
   margin: 0;
   color: #607793;
