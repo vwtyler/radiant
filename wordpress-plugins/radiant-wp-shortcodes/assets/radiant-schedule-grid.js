@@ -250,7 +250,7 @@
       const tracksList = el("ul", "radiant-grid-modal-list");
       const tracksEmpty = el("p", "radiant-grid-muted", "No tracks found for this airing.");
 
-      let selectedKey = airings[0].key;
+      let selectedKey = (airings.find((item) => (tracksByAiring[item.key] || []).length > 0) || airings[0]).key;
 
       function updateButtons() {
         const buttons = airingButtons.querySelectorAll("button");
@@ -263,7 +263,10 @@
       function renderTracks() {
         clearNode(tracksList);
         const activeAiring = airings.find((item) => item.key === selectedKey) || null;
-        const activeTracks = Array.isArray(tracksByAiring[selectedKey]) ? tracksByAiring[selectedKey] : [];
+        let activeTracks = Array.isArray(tracksByAiring[selectedKey]) ? tracksByAiring[selectedKey] : [];
+        if ((!activeTracks || !activeTracks.length) && activeAiring && activeAiring.inProgress && state.currentTrack) {
+          activeTracks = [state.currentTrack];
+        }
         playlistTitle.textContent = `Playlist${activeAiring ? ` · ${activeAiring.label}` : ""}`;
 
         if (!activeTracks.length) {
@@ -343,7 +346,13 @@
       };
     }
 
-    const insights = await fetchJson(`/v1/shows/${encodeURIComponent(show.slug)}/insights`, { tz: timezone });
+    const [insights, nowPlaying] = await Promise.all([
+      fetchJson(`/v1/shows/${encodeURIComponent(show.slug)}/insights`, {
+        tz: timezone,
+        include_current: 1,
+      }),
+      fetchJson("/v1/now-playing", { tz: timezone }),
+    ]);
 
     const djs = Array.isArray(insights.djs)
       ? insights.djs
@@ -369,7 +378,22 @@
       key: airing.key,
       label: formatAiringLabel(airing),
       playlistCount: Number(airing.playlist_count || 0),
+      inProgress: Boolean(airing.in_progress),
     }));
+
+    let currentTrack = null;
+    if (
+      nowPlaying &&
+      nowPlaying.show &&
+      nowPlaying.show.slug === show.slug &&
+      nowPlaying.track &&
+      (nowPlaying.track.artist || nowPlaying.track.title)
+    ) {
+      currentTrack = {
+        artist: nowPlaying.track.artist || "",
+        title: nowPlaying.track.title || "",
+      };
+    }
 
     const fallbackTracks = Array.isArray(insights.playlist_recent)
       ? insights.playlist_recent.slice(0, 25).map((track) => ({
@@ -384,6 +408,7 @@
       airings,
       tracksByAiring,
       tracks: fallbackTracks,
+      currentTrack,
     };
 
     showDetailsCache.set(show.slug, details);

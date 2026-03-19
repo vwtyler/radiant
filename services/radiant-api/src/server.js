@@ -1104,7 +1104,8 @@ function compareBroadcastDesc(a, b) {
   return parseClockToMinutes(b.end_time) - parseClockToMinutes(a.end_time);
 }
 
-function buildRecentBroadcastsForSlots(slots, timezone, limit = 2) {
+function buildRecentBroadcastsForSlots(slots, timezone, limit = 2, options = {}) {
+  const includeCurrent = Boolean(options.includeCurrent);
   const now = new Date();
   const zonedNow = getZonedParts(now, timezone);
   const today = toDateOnlyString(zonedNow);
@@ -1123,7 +1124,7 @@ function buildRecentBroadcastsForSlots(slots, timezone, limit = 2) {
     for (const weekOffset of [0, 7, 14]) {
       const dateLocal = shiftDate(today, -(daysBack + weekOffset));
       const isToday = weekOffset === 0 && daysBack === 0;
-      if (isToday && zonedNow.minuteOfDay < end) continue;
+      if (isToday && zonedNow.minuteOfDay < end && !includeCurrent) continue;
 
       results.push({
         key: `${dateLocal}|${slot.start_time}|${slot.end_time}`,
@@ -1133,6 +1134,7 @@ function buildRecentBroadcastsForSlots(slots, timezone, limit = 2) {
         start_time: slot.start_time,
         end_time: slot.end_time,
         timezone,
+        in_progress: isToday && zonedNow.minuteOfDay >= start && zonedNow.minuteOfDay < end,
       });
     }
   }
@@ -1141,7 +1143,7 @@ function buildRecentBroadcastsForSlots(slots, timezone, limit = 2) {
   return results.slice(0, limit);
 }
 
-async function buildAdminShowInsights(showId) {
+async function buildAdminShowInsights(showId, options = {}) {
   const id = Number(showId);
   if (!Number.isInteger(id) || id <= 0) return null;
 
@@ -1161,7 +1163,9 @@ async function buildAdminShowInsights(showId) {
   });
 
   const timezone = slotRows[0]?.timezone || defaultTimezone;
-  const recentBroadcasts = buildRecentBroadcastsForSlots(slotRows, timezone, 2);
+  const recentBroadcasts = buildRecentBroadcastsForSlots(slotRows, timezone, 2, {
+    includeCurrent: Boolean(options.includeCurrent),
+  });
 
   const showDjs = await directusRequest("/items/show_djs", {
     "filter[show][_eq]": String(id),
@@ -1258,7 +1262,7 @@ async function buildAdminShowInsights(showId) {
   };
 }
 
-async function buildShowInsightsBySlug(slug) {
+async function buildShowInsightsBySlug(slug, options = {}) {
   const cleanSlug = String(slug || "").trim();
   if (!cleanSlug) return null;
 
@@ -1270,7 +1274,7 @@ async function buildShowInsightsBySlug(slug) {
   const show = showRows[0] || null;
   if (!show?.id) return null;
 
-  return buildAdminShowInsights(show.id);
+  return buildAdminShowInsights(show.id, options);
 }
 
 function getClientIp(req) {
@@ -1720,7 +1724,8 @@ const server = http.createServer((req, res) => {
     const rawSlug = path.slice(prefix.length, -suffix.length);
     const slug = decodeURIComponent(rawSlug || "").trim();
     if (!slug || slug.includes("/")) return sendJson(res, 400, { error: "invalid_slug" }, corsHeaders);
-    const payload = await buildShowInsightsBySlug(slug);
+    const includeCurrent = String(requestUrl.searchParams.get("include_current") || "").trim() === "1";
+    const payload = await buildShowInsightsBySlug(slug, { includeCurrent });
     if (!payload) return sendJson(res, 404, { error: "not_found", slug }, corsHeaders);
     return sendJson(res, 200, payload, corsHeaders);
   }

@@ -413,6 +413,7 @@ button.danger {
   display: grid;
   place-items: center;
   padding: 1rem;
+  z-index: 10000 !important;
 }
 
 .modal-card {
@@ -657,7 +658,7 @@ textarea {
 }
 
 .modal-overlay.popup {
-  z-index: 30;
+  z-index: 11000 !important;
   background: #15223399;
 }
 
