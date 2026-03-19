@@ -154,6 +154,14 @@
     return slot && slot.show && typeof slot.show === "object" ? slot.show : null;
   }
 
+  function showTypeClass(slot) {
+    const type = String(slotShow(slot)?.show_type || "").toLowerCase();
+    if (["music", "talk", "mixed", "special"].includes(type)) {
+      return `type-${type}`;
+    }
+    return "type-default";
+  }
+
   function buildHourMarkers() {
     const markers = [0, COMPRESSED_END];
     for (let hour = 8; hour <= 24; hour += 1) markers.push(hour * 60);
@@ -169,6 +177,7 @@
     const height = Math.max(rawHeight - SLOT_GAP_PX, 24);
 
     const card = el("button", "radiant-grid-slot");
+    card.classList.add(showTypeClass(slot));
     if (isLive) card.classList.add("is-live");
     card.type = "button";
     card.style.top = `${top}px`;
@@ -454,6 +463,20 @@
       controls.appendChild(weekBtn);
       controls.appendChild(dayBtn);
     }
+
+    const legend = el("div", "radiant-grid-legend");
+    [
+      { cls: "type-music", label: "Music" },
+      { cls: "type-talk", label: "Talk" },
+      { cls: "type-mixed", label: "Mixed" },
+      { cls: "type-special", label: "Special" },
+    ].forEach((item) => {
+      const chip = el("span", `radiant-grid-legend-item ${item.cls}`);
+      chip.appendChild(el("i", ""));
+      chip.appendChild(el("span", "", item.label));
+      legend.appendChild(chip);
+    });
+    controls.appendChild(legend);
 
     const dayTabs = el("div", "radiant-grid-day-tabs");
     DAYS.forEach((day) => {

@@ -259,6 +259,8 @@
   display: flex;
   gap: 0.5rem;
   margin-bottom: 0.55rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .radiant-grid-controls button,
@@ -300,7 +302,7 @@
   border: 1px solid #cfd9e8;
   border-radius: 10px;
   overflow: hidden;
-  background: #f4f0e9;
+  background: #eff4fc;
 }
 
 .radiant-grid-day-header {
@@ -310,16 +312,16 @@
   justify-content: center;
   font-size: 0.74rem;
   font-weight: 700;
-  color: #5a4939;
+  color: #2e4a71;
   letter-spacing: 0.02em;
   border-bottom: 1px solid #d4deee;
-  background: linear-gradient(130deg, #f7f1e7, #efe4d3);
+  background: linear-gradient(130deg, #eef3fb, #e7edf8);
 }
 
 .radiant-grid-day-body {
   position: relative;
   overflow: hidden;
-  background: #fbf8f1;
+  background: #f8fbff;
 }
 
 .radiant-grid-hour-line {
@@ -334,10 +336,10 @@
   position: absolute;
   left: 0.22rem;
   right: 0.22rem;
-  border-radius: 8px;
-  border: 1px solid #8a5e32;
-  background: linear-gradient(165deg, #b47943, #996237);
-  color: #fffaf3;
+  border-radius: 12px;
+  border: 1px solid #8da1bb;
+  background: linear-gradient(145deg, #8ea2bb, #7f93ac);
+  color: #f8fffd;
   box-sizing: border-box;
   display: grid;
   gap: 0.16rem;
@@ -350,20 +352,91 @@
 }
 
 .radiant-grid-slot.is-live {
-  border-color: #f0d8b2;
-  box-shadow: 0 0 0 1px #f0d8b2 inset;
+  border-color: #b7d6eb;
+  box-shadow: 0 0 0 1px #b7d6eb inset;
+}
+
+.radiant-grid-slot.type-music {
+  border-color: #4f77a9;
+  background: linear-gradient(140deg, #4f77a9, #40648d);
+}
+
+.radiant-grid-slot.type-talk {
+  border-color: #b07845;
+  background: linear-gradient(140deg, #b07845, #99633a);
+}
+
+.radiant-grid-slot.type-mixed {
+  border-color: #3d8373;
+  background: linear-gradient(140deg, #3d8373, #336f62);
+}
+
+.radiant-grid-slot.type-special {
+  border-color: #6d62a8;
+  background: linear-gradient(140deg, #6d62a8, #5e5491);
 }
 
 .radiant-grid-slot-time {
   font-size: 0.62rem;
   line-height: 1.2;
-  color: #f6e8d4;
+  color: #d7e8f5;
 }
 
 .radiant-grid-slot-title {
   font-size: 0.72rem;
   line-height: 1.2;
-  color: #fffaf3;
+  color: #f8fffd;
+}
+
+.radiant-grid-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.radiant-grid-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  border-radius: 999px;
+  border: 1px solid #c9d5e7;
+  background: #f8fbff;
+  color: #425d80;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0.18rem 0.45rem;
+}
+
+.radiant-grid-legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #8ea2bb;
+  border: 1px solid #6f839c;
+  display: inline-block;
+}
+
+.radiant-grid-legend-item.type-music i {
+  background: #4f77a9;
+  border-color: #3f638e;
+}
+
+.radiant-grid-legend-item.type-talk i {
+  background: #b07845;
+  border-color: #945f35;
+}
+
+.radiant-grid-legend-item.type-mixed i {
+  background: #3d8373;
+  border-color: #31695d;
+}
+
+.radiant-grid-legend-item.type-special i {
+  background: #6d62a8;
+  border-color: #5a4f91;
 }
 
 .radiant-grid-empty {
@@ -480,6 +553,11 @@
 @media (max-width: 920px) {
   .radiant-grid-shell {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .radiant-grid-legend {
+    margin-left: 0;
+    width: 100%;
   }
 
   .radiant-grid-day-tabs {
