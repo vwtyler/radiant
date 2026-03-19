@@ -398,6 +398,30 @@ async function getRecentTrack() {
   return rows[0] || null;
 }
 
+async function getRecentTrackForLiveShowWindow(live, now) {
+  const showId = Number(live?.show?.id || 0);
+  if (!Number.isInteger(showId) || showId <= 0) return null;
+
+  const rows = await directusRequest("/items/playlist_tracks", {
+    fields: "id,played_at,artist,title,album,artwork_url,confidence,provider,provider_ref,show",
+    sort: "-played_at",
+    limit: "20",
+    "filter[show][_eq]": String(showId),
+  });
+
+  if (!rows.length) return null;
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const maxAgeMs = 12 * 60 * 60 * 1000;
+  for (const row of rows) {
+    const playedMs = new Date(row.played_at || "").getTime();
+    if (!Number.isFinite(playedMs)) continue;
+    const age = nowMs - playedMs;
+    if (age >= 0 && age <= maxAgeMs) return row;
+  }
+
+  return rows[0] || null;
+}
+
 function isTrackFreshAndConfident(track, now) {
   if (!track?.played_at) return false;
   const confidence = Number(track.confidence || 0);
@@ -1690,6 +1714,38 @@ const server = http.createServer((req, res) => {
             provider_ref: track.provider_ref || null,
           },
           show: safeShowSummary(showMap[track.show] || live.show || null),
+          context: {
+            override_active: live.override_active,
+            slot: live.slot,
+          },
+        },
+        corsHeaders,
+      );
+    }
+
+    const liveShowTrack = await getRecentTrackForLiveShowWindow(live, now);
+    if (liveShowTrack) {
+      const showMap = await getShowsByIds(liveShowTrack.show ? [liveShowTrack.show] : []);
+      return sendJson(
+        res,
+        200,
+        {
+          source: "track_live_window",
+          resolved_at: now.toISOString(),
+          fresh_until: new Date(now.getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
+          timezone,
+          track: {
+            id: liveShowTrack.id,
+            played_at: liveShowTrack.played_at,
+            artist: liveShowTrack.artist || null,
+            title: liveShowTrack.title || null,
+            album: liveShowTrack.album || null,
+            artwork_url: liveShowTrack.artwork_url || null,
+            confidence: liveShowTrack.confidence == null ? null : Number(liveShowTrack.confidence),
+            provider: liveShowTrack.provider || null,
+            provider_ref: liveShowTrack.provider_ref || null,
+          },
+          show: safeShowSummary(showMap[liveShowTrack.show] || live.show || null),
           context: {
             override_active: live.override_active,
             slot: live.slot,
