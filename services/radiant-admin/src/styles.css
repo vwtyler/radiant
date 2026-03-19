@@ -260,6 +260,10 @@ button.danger {
   z-index: 2;
 }
 
+.touch-safe .slot-card {
+  cursor: default;
+}
+
 .slot-card.menu-open {
   z-index: 80 !important;
 }
@@ -389,6 +393,10 @@ button.danger {
   border-radius: 999px;
   background: #ffffffa3;
   cursor: ns-resize;
+}
+
+.touch-safe .resize-handle {
+  display: none;
 }
 
 .slot-card.conflict {

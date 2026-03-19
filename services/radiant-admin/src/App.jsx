@@ -1125,6 +1125,10 @@ export function App() {
   });
   const [activeTab, setActiveTab] = useState("schedule");
   const [slotMenuId, setSlotMenuId] = useState(null);
+  const [touchSafeMode, setTouchSafeMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 980px), (pointer: coarse)").matches;
+  });
   const gridRef = useRef(null);
   const tempIdRef = useRef(1);
 
@@ -1158,6 +1162,15 @@ export function App() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia("(max-width: 980px), (pointer: coarse)");
+    const syncTouchSafe = () => setTouchSafeMode(media.matches);
+    syncTouchSafe();
+    media.addEventListener("change", syncTouchSafe);
+    return () => media.removeEventListener("change", syncTouchSafe);
   }, []);
 
   useEffect(() => {
@@ -1417,6 +1430,7 @@ export function App() {
   const pendingCount = pendingCreates.length + Object.keys(pendingUpdates).length + pendingDeletes.length;
 
   function beginDrag(event, slot, mode) {
+    if (touchSafeMode) return;
     if (!gridRef.current) return;
     const rect = gridRef.current.getBoundingClientRect();
     const columnWidth = rect.width / 7;
@@ -1433,7 +1447,7 @@ export function App() {
   }
 
   return (
-    <div className="page-shell">
+    <div className={touchSafeMode ? "page-shell touch-safe" : "page-shell"}>
       <header className="topbar">
         <div>
           <p className="eyebrow">Radiant</p>
@@ -1607,7 +1621,7 @@ export function App() {
                           ...blockStyle(slot, sideBySide),
                           zIndex: slotMenuId === slot.id ? 80 : 2,
                         }}
-                        onPointerDown={(event) => beginDrag(event, slot, "move")}
+                        onPointerDown={touchSafeMode ? undefined : (event) => beginDrag(event, slot, "move")}
                       >
                         <div className="slot-head">
                           <h3>
@@ -1682,14 +1696,16 @@ export function App() {
                         <p>{`${minuteToDisplay(parseTimeToMinutes(slot.start_time))} - ${minuteToDisplay(parseTimeToMinutes(slot.end_time))}`}</p>
                         {alternating.enabled ? <p className="alt-note">Alternating: {alternating.group}</p> : null}
                         {hasConflict ? <p className="conflict-note">Schedule conflict</p> : null}
-                        <div
-                          className="resize-handle"
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            beginDrag(event, slot, "resize");
-                          }}
-                          role="presentation"
-                        />
+                        {!touchSafeMode ? (
+                          <div
+                            className="resize-handle"
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                              beginDrag(event, slot, "resize");
+                            }}
+                            role="presentation"
+                          />
+                        ) : null}
                       </article>
                     );
                   })}
