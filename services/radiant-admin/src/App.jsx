@@ -193,7 +193,7 @@ function AddSlotDialog({ open, onClose, onCreate, shows }) {
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal-overlay" role="dialog" aria-modal="true" style={{ zIndex: 10000 }}>
       <div className="modal-card">
         <h2>Add Schedule Slot</h2>
         <label>
@@ -335,7 +335,7 @@ function EditSlotDialog({
   if (!open || !slot || !form) return null;
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal-overlay" role="dialog" aria-modal="true" style={{ zIndex: 10000 }}>
       <div className="modal-card">
         <h2>Edit Schedule Slot</h2>
         <p className="slot-meta">{show?.title || "Unassigned Show"}</p>
@@ -444,7 +444,7 @@ function EditSlotDialog({
 function PlaylistPopup({ open, broadcast, tracks, onClose }) {
   if (!open || !broadcast) return null;
   return (
-    <div className="modal-overlay popup" role="dialog" aria-modal="true">
+    <div className="modal-overlay popup" role="dialog" aria-modal="true" style={{ zIndex: 11000 }}>
       <div className="modal-card wide">
         <h2>
           Playlist: {broadcast.weekday_name} {broadcast.date_local} {broadcast.start_time}-{broadcast.end_time}
@@ -639,7 +639,7 @@ function ShowDetailsDialog({ open, showId, onClose }) {
   }
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal-overlay" role="dialog" aria-modal="true" style={{ zIndex: 10000 }}>
       <div className="modal-card wide">
         <div className="show-header-row">
           <h2>{insights?.show?.title || "Show Details"}</h2>
@@ -882,7 +882,7 @@ function ShowDetailsDialog({ open, showId, onClose }) {
       />
 
       {selectedDj ? (
-        <div className="modal-overlay popup" role="dialog" aria-modal="true">
+        <div className="modal-overlay popup" role="dialog" aria-modal="true" style={{ zIndex: 11000 }}>
           <div className="modal-card">
             <div className="show-header-row">
               <h2>{selectedDj.name}</h2>

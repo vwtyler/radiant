@@ -267,6 +267,9 @@
         if ((!activeTracks || !activeTracks.length) && activeAiring && activeAiring.inProgress && state.currentTrack) {
           activeTracks = [state.currentTrack];
         }
+        if ((!activeTracks || !activeTracks.length) && state.tracks && state.tracks.length) {
+          activeTracks = state.tracks.slice(0, 25);
+        }
         playlistTitle.textContent = `Playlist${activeAiring ? ` · ${activeAiring.label}` : ""}`;
 
         if (!activeTracks.length) {
