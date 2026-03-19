@@ -108,31 +108,38 @@
     const params = query || {};
 
     if (proxyUrl) {
-      const body = new URLSearchParams();
-      body.set("action", "radiant_wp_proxy");
-      body.set("radiant_path", path);
-      Object.entries(params).forEach(([key, value]) => {
-        if (value != null && value !== "") body.set(key, String(value));
-      });
+      try {
+        const body = new URLSearchParams();
+        body.set("action", "radiant_wp_proxy");
+        body.set("radiant_path", path);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value != null && value !== "") body.set(key, String(value));
+        });
 
-      const response = await fetch(proxyUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        },
-        credentials: "same-origin",
-        body: body.toString(),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload || payload.success !== true) {
-        const message =
-          (payload && payload.data && payload.data.message) ||
-          (payload && payload.message) ||
-          `Proxy request failed (${response.status})`;
-        throw new Error(message);
+        const response = await fetch(proxyUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          credentials: "same-origin",
+          body: body.toString(),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload || payload.success !== true) {
+          const message =
+            (payload && payload.data && payload.data.message) ||
+            (payload && payload.message) ||
+            `Proxy request failed (${response.status})`;
+          throw new Error(message);
+        }
+        return payload.data;
+      } catch (proxyError) {
+        if (!apiBaseUrl) {
+          throw proxyError;
+        }
       }
-      return payload.data;
     }
 
     if (!apiBaseUrl) throw new Error("Radiant API Base URL is not configured.");
