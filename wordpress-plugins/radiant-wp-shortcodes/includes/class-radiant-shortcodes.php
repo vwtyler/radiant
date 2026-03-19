@@ -79,7 +79,7 @@ class Radiant_Shortcodes
             wp_localize_script('radiant-wp-schedule-grid', 'radiantWpGridConfig', [
                 'apiBaseUrl' => isset($settings['api_base_url']) ? (string) $settings['api_base_url'] : '',
                 'defaultTimezone' => self::default_timezone(),
-                'proxyUrl' => admin_url('admin-ajax.php', 'relative'),
+                'proxyUrl' => admin_url('admin-ajax.php'),
             ]);
         }
 
@@ -121,14 +121,14 @@ class Radiant_Shortcodes
 
     public static function ajax_proxy()
     {
-        $path = isset($_GET['radiant_path']) ? wp_unslash((string) $_GET['radiant_path']) : '';
+        $path = isset($_REQUEST['radiant_path']) ? wp_unslash((string) $_REQUEST['radiant_path']) : '';
         if (!self::is_allowed_proxy_path($path)) {
             wp_send_json_error([
                 'message' => 'Unsupported API path.',
             ], 400);
         }
 
-        $query = $_GET;
+        $query = $_REQUEST;
         unset($query['action'], $query['radiant_path']);
 
         $payload = Radiant_Api_Client::get_json($path, $query);
