@@ -185,7 +185,7 @@ button.danger {
 }
 
 .hour-cell {
-  height: calc(60px * 1.1);
+  height: calc(60px * 1.5);
   box-sizing: border-box;
   padding: 0.22rem 0.5rem;
   color: var(--ink-soft);
@@ -250,18 +250,85 @@ button.danger {
   left: 0.32rem;
   right: 0.32rem;
   border-radius: 10px;
-  border: 1px solid #2d568f;
-  background: linear-gradient(135deg, #2c5c9f, #3e74bc);
+  border: 1px solid #8da1bb;
+  background: linear-gradient(145deg, #8ea2bbe8, #7f93ace8);
   color: #f8fffd;
-  padding: 0.35rem 0.45rem 0.8rem;
+  padding: 0.39rem 0.5rem 0.92rem;
   cursor: grab;
   overflow: visible;
   box-shadow: 0 4px 12px #22344a2e;
   z-index: 2;
 }
 
+.slot-tooltip {
+  position: absolute;
+  left: 50%;
+  top: -0.35rem;
+  transform: translate(-50%, -100%);
+  min-width: 160px;
+  max-width: 240px;
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.36rem 0.46rem;
+  border: 1px solid #cfd8e9;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #22344f;
+  box-shadow: 0 8px 18px #1d2b4026;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 120;
+  transition: opacity 120ms ease;
+}
+
+.slot-tooltip strong {
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.slot-tooltip span {
+  color: #566b88;
+}
+
+.slot-card.tooltip-visible .slot-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.slot-card.menu-open .slot-tooltip {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.slot-card.type-music {
+  border-color: #4f77a9;
+  background: linear-gradient(140deg, #4f77a9e6, #40648de6);
+}
+
+.slot-card.type-talk {
+  border-color: #b07845;
+  background: linear-gradient(140deg, #b07845e6, #99633ae6);
+}
+
+.slot-card.type-mixed {
+  border-color: #3d8373;
+  background: linear-gradient(140deg, #3d8373e6, #336f62e6);
+}
+
+.slot-card.type-special {
+  border-color: #6d62a8;
+  background: linear-gradient(140deg, #6d62a8e6, #5e5491e6);
+}
+
 .touch-safe .slot-card {
   cursor: default;
+}
+
+.touch-safe .slot-tooltip {
+  display: none;
 }
 
 .slot-card.menu-open {
@@ -270,7 +337,7 @@ button.danger {
 
 .slot-card h3 {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: 0.92rem;
   font-family: "Space Grotesk", "Arial Narrow", sans-serif;
 }
 
@@ -286,7 +353,7 @@ button.danger {
 
 .slot-card p {
   margin: 0.2rem 0 0;
-  font-size: 0.72rem;
+  font-size: 0.79rem;
 }
 
 .slot-head {

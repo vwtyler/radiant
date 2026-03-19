@@ -11,7 +11,7 @@ const DAYS = [
   { num: 6, label: "Sat" },
 ];
 
-const PX_PER_MINUTE = 1.1;
+const PX_PER_MINUTE = 1.5;
 const GRID_MINUTES = 24 * 60;
 const COMPRESSED_BLOCK_END_MINUTES = 7 * 60;
 const COMPRESSED_BLOCK_VISUAL_MINUTES = 60;
@@ -143,9 +143,12 @@ function getSideBySideInfo(daySlots, targetSlot) {
 function blockStyle(slot, sideBySide) {
   const start = parseTimeToMinutes(slot.start_time);
   const duration = durationMinutes(slot);
+  const topInset = 3;
+  const bottomInset = 3;
+  const rawHeight = Math.max(rangeToVisualMinutes(start, duration) * PX_PER_MINUTE, 24);
   const style = {
-    top: `${minuteToVisualMinute(start) * PX_PER_MINUTE}px`,
-    height: `${Math.max(rangeToVisualMinutes(start, duration) * PX_PER_MINUTE, 24)}px`,
+    top: `${minuteToVisualMinute(start) * PX_PER_MINUTE + topInset}px`,
+    height: `${Math.max(rawHeight - topInset - bottomInset, 20)}px`,
   };
 
   if (sideBySide.count > 1) {
@@ -1335,11 +1338,13 @@ export function App() {
   });
   const [activeTab, setActiveTab] = useState("schedule");
   const [slotMenuId, setSlotMenuId] = useState(null);
+  const [tooltipSlotId, setTooltipSlotId] = useState(null);
   const [touchSafeMode, setTouchSafeMode] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.matchMedia("(max-width: 980px), (pointer: coarse)").matches;
   });
   const gridRef = useRef(null);
+  const tooltipTimerRef = useRef(null);
   const tempIdRef = useRef(1);
 
   const [dragState, setDragState] = useState(null);
@@ -1395,6 +1400,25 @@ export function App() {
     media.addEventListener("change", syncTouchSafe);
     return () => media.removeEventListener("change", syncTouchSafe);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (tooltipTimerRef.current) {
+        clearTimeout(tooltipTimerRef.current);
+        tooltipTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!slotMenuId) return;
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltipSlotId(null);
+  }, [slotMenuId]);
 
   useEffect(() => {
     if (!dragState) return undefined;
@@ -1615,6 +1639,26 @@ export function App() {
         ...normalized,
       },
     }));
+  }
+
+  function beginTooltipHover(slotId) {
+    if (touchSafeMode || slotMenuId) return;
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    tooltipTimerRef.current = setTimeout(() => {
+      setTooltipSlotId(slotId);
+      tooltipTimerRef.current = null;
+    }, 1000);
+  }
+
+  function endTooltipHover(slotId) {
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltipSlotId((current) => (current === slotId ? null : current));
   }
 
   async function handleCommitChanges() {
@@ -1838,14 +1882,17 @@ export function App() {
                     const hasConflict = overlapsOnDay(daySlots, slot);
                     const sideBySide = getSideBySideInfo(daySlots, slot);
                     const alternating = parseAlternatingMeta(slot.slot_key);
+                    const slotTimeLabel = `${minuteToDisplay(parseTimeToMinutes(slot.start_time))} - ${minuteToDisplay(parseTimeToMinutes(slot.end_time))}`;
                     return (
                       <article
                         key={slot.id}
                         className={
                           [
                             "slot-card",
+                            `type-${String(show.show_type || "default").toLowerCase()}`,
                             hasConflict ? "conflict" : "",
                             slotMenuId === slot.id ? "menu-open" : "",
+                            tooltipSlotId === slot.id ? "tooltip-visible" : "",
                           ]
                             .filter(Boolean)
                             .join(" ")
@@ -1855,7 +1902,15 @@ export function App() {
                           zIndex: slotMenuId === slot.id ? 80 : 2,
                         }}
                         onPointerDown={touchSafeMode ? undefined : (event) => beginDrag(event, slot, "move")}
+                        onPointerEnter={touchSafeMode ? undefined : () => beginTooltipHover(slot.id)}
+                        onPointerLeave={touchSafeMode ? undefined : () => endTooltipHover(slot.id)}
+                        onFocus={touchSafeMode ? undefined : () => beginTooltipHover(slot.id)}
+                        onBlur={touchSafeMode ? undefined : () => endTooltipHover(slot.id)}
                       >
+                        <div className="slot-tooltip" role="note" aria-hidden="true">
+                          <strong>{show.title || "Unassigned Show"}</strong>
+                          <span>{slotTimeLabel}</span>
+                        </div>
                         <div className="slot-head">
                           <h3>
                             <button
@@ -1926,7 +1981,7 @@ export function App() {
                             ) : null}
                           </div>
                         </div>
-                        <p>{`${minuteToDisplay(parseTimeToMinutes(slot.start_time))} - ${minuteToDisplay(parseTimeToMinutes(slot.end_time))}`}</p>
+                        <p>{slotTimeLabel}</p>
                         {alternating.enabled ? <p className="alt-note">Alternating: {alternating.group}</p> : null}
                         {hasConflict ? <p className="conflict-note">Schedule conflict</p> : null}
                         {!touchSafeMode ? (
