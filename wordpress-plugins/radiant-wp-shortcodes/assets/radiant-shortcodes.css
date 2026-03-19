@@ -300,7 +300,7 @@
   border: 1px solid #cfd9e8;
   border-radius: 10px;
   overflow: hidden;
-  background: #eff4fc;
+  background: #edf3f8;
 }
 
 .radiant-grid-day-header {
@@ -310,10 +310,10 @@
   justify-content: center;
   font-size: 0.74rem;
   font-weight: 700;
-  color: #2e4a71;
+  color: #2d4c66;
   letter-spacing: 0.02em;
   border-bottom: 1px solid #d4deee;
-  background: linear-gradient(130deg, #eef3fb, #e7edf8);
+  background: linear-gradient(130deg, #e9f0f6, #e2ebf3);
 }
 
 .radiant-grid-day-body {
@@ -335,8 +335,8 @@
   left: 0.22rem;
   right: 0.22rem;
   border-radius: 8px;
-  border: 1px solid #2d568f;
-  background: linear-gradient(135deg, #2c5c9f, #3e74bc);
+  border: 1px solid #355776;
+  background: linear-gradient(168deg, #527a9c, #3f6483);
   color: #f8fffd;
   box-sizing: border-box;
   display: grid;
@@ -350,14 +350,14 @@
 }
 
 .radiant-grid-slot.is-live {
-  border-color: #9bd4ff;
-  box-shadow: 0 0 0 1px #9bd4ff inset;
+  border-color: #b7d6eb;
+  box-shadow: 0 0 0 1px #b7d6eb inset;
 }
 
 .radiant-grid-slot-time {
   font-size: 0.62rem;
   line-height: 1.2;
-  color: #dbe8ff;
+  color: #d7e8f5;
 }
 
 .radiant-grid-slot-title {

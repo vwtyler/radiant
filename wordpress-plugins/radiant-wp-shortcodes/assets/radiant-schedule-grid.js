@@ -18,6 +18,7 @@
   const COMPRESSED_END = 7 * 60;
   const COMPRESSED_VISUAL = 60;
   const DAY_VISIBLE_MINUTES = COMPRESSED_VISUAL + (24 * 60 - COMPRESSED_END);
+  const SLOT_GAP_PX = 4;
 
   const showDetailsCache = new Map();
 
@@ -162,8 +163,10 @@
   function makeSlotCard(slot, onClick, isLive) {
     const start = parseHHMM(slot.start_time);
     const duration = durationMinutes(slot);
-    const top = visualMinutePx(start);
-    const height = Math.max(Math.round(visualDuration(start, duration) * PX_PER_MINUTE), 36);
+    const rawTop = visualMinutePx(start);
+    const rawHeight = Math.max(Math.round(visualDuration(start, duration) * PX_PER_MINUTE), 36);
+    const top = rawTop + Math.floor(SLOT_GAP_PX / 2);
+    const height = Math.max(rawHeight - SLOT_GAP_PX, 24);
 
     const card = el("button", "radiant-grid-slot");
     if (isLive) card.classList.add("is-live");
