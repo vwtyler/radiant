@@ -1096,6 +1096,16 @@ async function buildAdminShows() {
     limit: "-1",
   });
 
+  const scheduleRows = await directusRequest("/items/schedule_slots", {
+    fields: "show",
+    limit: "-1",
+  });
+  const scheduledShowIds = new Set(
+    scheduleRows
+      .map((row) => Number(row?.show || 0))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  );
+
   const djsByShow = {};
   for (const row of showLinks) {
     const showId = Number(row?.show || 0);
@@ -1112,6 +1122,7 @@ async function buildAdminShows() {
   const items = rows.map((row) => ({
     ...row,
     djs: djsByShow[row.id] || [],
+    is_scheduled: scheduledShowIds.has(Number(row.id)),
   }));
 
   return {
@@ -1125,6 +1136,7 @@ function validateAdminShowPayload(input, existing) {
   const slug = input.slug == null ? existing.slug : String(input.slug).trim();
   const description = input.description == null ? existing.description : String(input.description);
   const showType = input.show_type == null ? existing.show_type : String(input.show_type).trim();
+  const isActive = input.is_active == null ? Boolean(existing.is_active) : Boolean(input.is_active);
 
   if (!title) throw new Error("title is required");
   if (!slug) throw new Error("slug is required");
@@ -1140,6 +1152,7 @@ function validateAdminShowPayload(input, existing) {
     slug,
     description,
     show_type: showType,
+    is_active: isActive,
   };
 }
 
@@ -1293,7 +1306,7 @@ async function buildAdminShowInsights(showId, options = {}) {
 
   const showRows = await directusRequest("/items/shows", {
     "filter[id][_eq]": String(id),
-    fields: "id,slug,title,description,artwork_url,show_type",
+    fields: "id,slug,title,description,artwork_url,show_type,is_active",
     limit: "1",
   });
   const show = showRows[0] || null;
@@ -1366,7 +1379,11 @@ async function buildAdminShowInsights(showId, options = {}) {
   }));
 
   return {
-    show: safeShowSummary(show),
+    show: {
+      ...safeShowSummary(show),
+      is_active: Boolean(show.is_active),
+      is_scheduled: slotRows.length > 0,
+    },
     djs: showDjs
       .map((row) => ({
         role: row.role || null,
@@ -1696,7 +1713,7 @@ const server = http.createServer((req, res) => {
       }
       const rows = await directusRequest("/items/shows", {
         "filter[id][_eq]": String(id),
-        fields: "id,title,slug,description,show_type",
+        fields: "id,title,slug,description,show_type,is_active",
         limit: "1",
       });
       const existing = rows[0] || null;

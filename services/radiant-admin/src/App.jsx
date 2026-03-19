@@ -472,7 +472,7 @@ function PlaylistPopup({ open, broadcast, tracks, onClose }) {
   );
 }
 
-function ShowDetailsDialog({ open, showId, onClose }) {
+function ShowDetailsDialog({ open, showId, onClose, onShowChanged }) {
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -488,7 +488,26 @@ function ShowDetailsDialog({ open, showId, onClose }) {
   const [newDjForm, setNewDjForm] = useState({ name: "", slug: "", bio: "", image_url: "" });
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ title: "", slug: "", show_type: "music", description: "" });
+  const [form, setForm] = useState({ title: "", slug: "", show_type: "music", description: "", is_active: true });
+
+  function toShowListItem(payload) {
+    if (!payload?.show?.id) return null;
+    return {
+      id: payload.show.id,
+      slug: payload.show.slug || "",
+      title: payload.show.title || "",
+      show_type: payload.show.show_type || "music",
+      is_active: Boolean(payload.show.is_active),
+      is_scheduled: Boolean(payload.show.is_scheduled),
+      djs: (payload.djs || [])
+        .map((row) => ({
+          id: row?.dj?.id,
+          name: row?.dj?.name || "",
+          role: row?.role || null,
+        }))
+        .filter((dj) => dj.id),
+    };
+  }
 
   async function refreshShowDetails(targetShowId) {
     const [payload, djsPayload] = await Promise.all([
@@ -518,6 +537,7 @@ function ShowDetailsDialog({ open, showId, onClose }) {
           slug: payload?.show?.slug || "",
           show_type: payload?.show?.show_type || "music",
           description: payload?.show?.description || "",
+          is_active: Boolean(payload?.show?.is_active),
         });
         setEditMode(false);
       } catch (loadError) {
@@ -564,7 +584,10 @@ function ShowDetailsDialog({ open, showId, onClose }) {
         slug: refreshed?.show?.slug || "",
         show_type: refreshed?.show?.show_type || "music",
         description: refreshed?.show?.description || "",
+        is_active: Boolean(refreshed?.show?.is_active),
       });
+      const nextListItem = toShowListItem(refreshed);
+      if (nextListItem && typeof onShowChanged === "function") onShowChanged(nextListItem);
       setEditMode(false);
     } catch (saveError) {
       setError(saveError.message || "Failed to update show details.");
@@ -678,6 +701,14 @@ function ShowDetailsDialog({ open, showId, onClose }) {
                 <option value="special">special</option>
               </select>
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={Boolean(form.is_active)}
+                onChange={(event) => setForm((prev) => ({ ...prev, is_active: event.target.checked }))}
+              />
+              Active show
+            </label>
             <label>
               Description
               <textarea
@@ -702,6 +733,14 @@ function ShowDetailsDialog({ open, showId, onClose }) {
           <div>
             <p className="meta-label">Slug</p>
             <p className="meta-value">{insights?.show?.slug || "n/a"}</p>
+          </div>
+          <div>
+            <p className="meta-label">Status</p>
+            <p className="meta-value">{insights?.show?.is_active ? "Active" : "Inactive"}</p>
+          </div>
+          <div>
+            <p className="meta-label">Scheduled</p>
+            <p className="meta-value">{insights?.show?.is_scheduled ? "Yes" : "No"}</p>
           </div>
         </div>
         {insights?.show?.description ? <p className="slot-meta compact">{insights.show.description}</p> : null}
@@ -1258,6 +1297,9 @@ function ShowsTab({ shows, onOpenShow }) {
               <span className={show.is_active ? "status-pill active" : "status-pill inactive"}>
                 {show.is_active ? "Active" : "Inactive"}
               </span>
+              <span className={show.is_scheduled ? "status-pill scheduled" : "status-pill unscheduled"}>
+                {show.is_scheduled ? "Scheduled" : "Unscheduled"}
+              </span>
               <span className="show-stat">DJs: {(show.djs || []).length}</span>
             </div>
 
@@ -1326,6 +1368,19 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleShowChanged(nextShow) {
+    if (!nextShow?.id) return;
+    setShows((previous) =>
+      previous.map((show) => {
+        if (Number(show.id) !== Number(nextShow.id)) return show;
+        return {
+          ...show,
+          ...nextShow,
+        };
+      }),
+    );
   }
 
   useEffect(() => {
@@ -1920,6 +1975,7 @@ export function App() {
         open={Boolean(showDetailsShowId)}
         showId={showDetailsShowId}
         onClose={() => setShowDetailsShowId(null)}
+        onShowChanged={handleShowChanged}
       />
     </div>
   );

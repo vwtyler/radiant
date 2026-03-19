@@ -878,9 +878,10 @@ textarea {
 .show-card-stats-row {
   margin-top: 0.1rem;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .status-pill {
@@ -905,6 +906,18 @@ textarea {
   border-color: #c7cfdd;
   background: #f4f6fb;
   color: #5b6c83;
+}
+
+.status-pill.scheduled {
+  border-color: #9fcfd1;
+  background: #ebf8f8;
+  color: #2f6f72;
+}
+
+.status-pill.unscheduled {
+  border-color: #e0c9a4;
+  background: #fcf4e9;
+  color: #8a6032;
 }
 
 .show-stat {
