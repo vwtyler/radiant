@@ -1089,9 +1089,34 @@ async function buildAdminShows() {
     sort: "title",
     limit: "-1",
   });
+
+  const showLinks = await directusRequest("/items/show_djs", {
+    fields: "show,dj.id,dj.name,role",
+    sort: "dj.name",
+    limit: "-1",
+  });
+
+  const djsByShow = {};
+  for (const row of showLinks) {
+    const showId = Number(row?.show || 0);
+    if (!Number.isInteger(showId) || showId <= 0) continue;
+    if (!djsByShow[showId]) djsByShow[showId] = [];
+    if (!row?.dj?.id) continue;
+    djsByShow[showId].push({
+      id: row.dj.id,
+      name: row.dj.name || "",
+      role: row.role || null,
+    });
+  }
+
+  const items = rows.map((row) => ({
+    ...row,
+    djs: djsByShow[row.id] || [],
+  }));
+
   return {
-    count: rows.length,
-    items: rows,
+    count: items.length,
+    items,
   };
 }
 

@@ -1107,6 +1107,174 @@ function ReportingTab() {
   );
 }
 
+function ShowsTab({ shows, onOpenShow }) {
+  const [searchText, setSearchText] = useState("");
+  const [showTypeFilter, setShowTypeFilter] = useState("all");
+  const [djFilter, setDjFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("all");
+
+  const activeFilterCount =
+    (searchText.trim() ? 1 : 0) +
+    (showTypeFilter !== "all" ? 1 : 0) +
+    (djFilter !== "all" ? 1 : 0) +
+    (activeFilter !== "all" ? 1 : 0);
+
+  const djOptions = useMemo(() => {
+    const map = new Map();
+    for (const show of shows) {
+      for (const dj of show.djs || []) {
+        if (!dj?.id || !dj?.name) continue;
+        map.set(Number(dj.id), { id: Number(dj.id), name: dj.name });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [shows]);
+
+  const filteredShows = useMemo(() => {
+    const needle = searchText.trim().toLowerCase();
+    return shows.filter((show) => {
+      if (showTypeFilter !== "all" && show.show_type !== showTypeFilter) return false;
+      if (activeFilter === "active" && !show.is_active) return false;
+      if (activeFilter === "inactive" && show.is_active) return false;
+      if (djFilter !== "all") {
+        const wantedDjId = Number(djFilter);
+        if (!(show.djs || []).some((dj) => Number(dj.id) === wantedDjId)) return false;
+      }
+      if (!needle) return true;
+      const haystack = `${show.title || ""} ${show.slug || ""} ${(show.show_type || "")}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [shows, searchText, showTypeFilter, djFilter, activeFilter]);
+
+  function resetFilters() {
+    setSearchText("");
+    setShowTypeFilter("all");
+    setDjFilter("all");
+    setActiveFilter("all");
+  }
+
+  function showTypeClass(showType) {
+    const normalized = String(showType || "").toLowerCase();
+    if (["music", "talk", "mixed", "special"].includes(normalized)) return `type-${normalized}`;
+    return "type-default";
+  }
+
+  return (
+    <section className="shows-shell">
+      <div className="shows-header">
+        <div>
+          <h2>Shows</h2>
+          <p className="subhead">Filter by type, DJ, and status, then open a show to edit details.</p>
+        </div>
+        <div className="shows-header-meta">
+          <p className="shows-count">{filteredShows.length} show(s)</p>
+          {activeFilterCount ? <p className="shows-active-filters">{activeFilterCount} filter(s) active</p> : null}
+        </div>
+      </div>
+
+      <div className="shows-toolbar">
+        <div className="shows-filters">
+          <label>
+            Search
+            <input
+              type="text"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="Title or slug"
+            />
+          </label>
+
+          <label>
+            Show Type
+            <select value={showTypeFilter} onChange={(event) => setShowTypeFilter(event.target.value)}>
+              <option value="all">All</option>
+              <option value="music">Music</option>
+              <option value="talk">Talk</option>
+              <option value="mixed">Mixed</option>
+              <option value="special">Special</option>
+            </select>
+          </label>
+
+          <label>
+            DJ
+            <select value={djFilter} onChange={(event) => setDjFilter(event.target.value)}>
+              <option value="all">All DJs</option>
+              {djOptions.map((dj) => (
+                <option key={dj.id} value={String(dj.id)}>
+                  {dj.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Status
+            <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value)}>
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="shows-toolbar-actions">
+          <button className="ghost" type="button" onClick={resetFilters}>
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
+      <div className="shows-grid">
+        {filteredShows.map((show) => (
+          <article
+            key={show.id}
+            className={[
+              "show-card",
+              showTypeClass(show.show_type),
+              show.is_active ? "is-active" : "is-inactive",
+            ].join(" ")}
+          >
+            <div className="show-card-head">
+              <h3>{show.title || "Untitled Show"}</h3>
+              <span className={`show-type-pill ${showTypeClass(show.show_type)}`}>{show.show_type || "unknown"}</span>
+            </div>
+
+            <p className="show-card-slug">{show.slug || "n/a"}</p>
+
+            <div className="show-card-djs">
+              {(show.djs || []).length ? (
+                (show.djs || []).slice(0, 4).map((dj) => (
+                  <span key={`${show.id}-${dj.id}`} className="dj-chip">
+                    {dj.name}
+                    {dj.role ? <em>{dj.role}</em> : null}
+                  </span>
+                ))
+              ) : (
+                <span className="dj-chip empty">No DJs linked</span>
+              )}
+            </div>
+
+            <div className="show-card-stats-row">
+              <span className={show.is_active ? "status-pill active" : "status-pill inactive"}>
+                {show.is_active ? "Active" : "Inactive"}
+              </span>
+              <span className="show-stat">DJs: {(show.djs || []).length}</span>
+            </div>
+
+            <div className="show-card-actions">
+              <button className="primary" type="button" onClick={() => onOpenShow(show.id)}>
+                Edit Details
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {!filteredShows.length ? <p className="shows-empty">No shows match the selected filters.</p> : null}
+    </section>
+  );
+}
+
 export function App() {
   const [slots, setSlots] = useState([]);
   const [shows, setShows] = useState([]);
@@ -1455,7 +1623,9 @@ export function App() {
           <p className="subhead">
             {activeTab === "schedule"
               ? "Sun-Sat visual planner with drag, resize, and quick slot creation."
-              : "Generate and download reporting exports for station operations."}
+              : activeTab === "shows"
+                ? "Filter and edit show records, metadata, and DJ relationships."
+                : "Generate and download reporting exports for station operations."}
           </p>
         </div>
         <div className="topbar-actions">
@@ -1467,6 +1637,14 @@ export function App() {
               onClick={() => setActiveTab("schedule")}
             >
               Schedule
+            </button>
+            <button
+              className={activeTab === "shows" ? "ghost active" : "ghost"}
+              type="button"
+              aria-pressed={activeTab === "shows"}
+              onClick={() => setActiveTab("shows")}
+            >
+              Shows
             </button>
             <button
               className={activeTab === "reports" ? "ghost active" : "ghost"}
@@ -1716,6 +1894,8 @@ export function App() {
         </div>
           </section>
         </>
+      ) : activeTab === "shows" ? (
+        <ShowsTab shows={shows} onOpenShow={setShowDetailsShowId} />
       ) : (
         <ReportingTab />
       )}
