@@ -27,7 +27,15 @@ const acrCallbackToken = process.env.ACRCLOUD_CALLBACK_TOKEN || "";
 const acrDedupeSeconds = Number(process.env.ACRCLOUD_DEDUPE_SECONDS || 120);
 const acrExpectedProjectId = String(process.env.ACRCLOUD_EXPECTED_PROJECT_ID || "").trim();
 const radiantAdminToken = process.env.RADIANT_ADMIN_TOKEN || "";
+const radiantAdminTitleDefault = String(process.env.RADIANT_ADMIN_TITLE || "KAAD-lp Admin").trim() || "KAAD-lp Admin";
+const radiantPublicStatusTitleDefault =
+  String(process.env.RADIANT_PUBLIC_STATUS_TITLE || "Public Status").trim() || "Public Status";
 const icecastConfigPath = process.env.ICECAST_META_CONFIG_PATH || "/app/data/icecast-meta-config.json";
+const icecastListenerHistoryPath = process.env.ICECAST_LISTENER_HISTORY_PATH || "/app/data/icecast-listener-history.json";
+const icecastGeoCachePath = process.env.ICECAST_GEO_CACHE_PATH || "/app/data/icecast-geo-cache.json";
+const icecastGeoCacheSuccessTtlMs = Number(process.env.ICECAST_GEO_CACHE_SUCCESS_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+const icecastGeoCacheFailureTtlMs = Number(process.env.ICECAST_GEO_CACHE_FAILURE_TTL_MS || 5 * 60 * 1000);
+const icecastSnapshotCacheMs = Number(process.env.ICECAST_SNAPSHOT_CACHE_MS || 20000);
 
 function parseBooleanEnv(value, fallback = false) {
   const text = String(value == null ? "" : value)
@@ -40,6 +48,8 @@ function parseBooleanEnv(value, fallback = false) {
 }
 
 const icecastDefaults = {
+  admin_title: radiantAdminTitleDefault,
+  public_status_title: radiantPublicStatusTitleDefault,
   enabled: parseBooleanEnv(process.env.ICECAST_META_ENABLED, false),
   scheme: String(process.env.ICECAST_META_SCHEME || "http").trim().toLowerCase() === "https" ? "https" : "http",
   host: String(process.env.ICECAST_META_HOST || "").trim(),
@@ -51,6 +61,13 @@ const icecastDefaults = {
 
 let directusToken = null;
 let icecastConfigCache = null;
+let listenerHistoryCache = null;
+let geoCache = null;
+let icecastCollectorStarted = false;
+let icecastCollectorBusy = false;
+let latestIcecastSnapshot = null;
+let latestIcecastSnapshotAtMs = 0;
+let icecastSnapshotInFlight = null;
 
 const weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -263,6 +280,15 @@ function normalizeDisplayText(value) {
   return text;
 }
 
+function toIsoDateTime(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const direct = new Date(text);
+  if (!Number.isNaN(direct.getTime())) return direct.toISOString();
+  return toIsoUtc(text);
+}
+
 function normalizeIcecastMount(value) {
   const trimmed = String(value || "")
     .trim()
@@ -273,6 +299,8 @@ function normalizeIcecastMount(value) {
 
 function normalizeIcecastConfig(input = {}, existing = icecastDefaults) {
   const merged = {
+    admin_title: input.admin_title == null ? existing.admin_title : String(input.admin_title),
+    public_status_title: input.public_status_title == null ? existing.public_status_title : String(input.public_status_title),
     enabled: input.enabled == null ? existing.enabled : Boolean(input.enabled),
     scheme: input.scheme == null ? existing.scheme : String(input.scheme).trim().toLowerCase(),
     host: input.host == null ? existing.host : String(input.host).trim(),
@@ -283,6 +311,8 @@ function normalizeIcecastConfig(input = {}, existing = icecastDefaults) {
   };
 
   return {
+    admin_title: String(merged.admin_title || "").trim() || "KAAD-lp Admin",
+    public_status_title: String(merged.public_status_title || "").trim() || "Public Status",
     enabled: Boolean(merged.enabled),
     scheme: merged.scheme === "https" ? "https" : "http",
     host: merged.host,
@@ -295,6 +325,8 @@ function normalizeIcecastConfig(input = {}, existing = icecastDefaults) {
 
 function sanitizeIcecastConfigForClient(config) {
   return {
+    admin_title: String(config.admin_title || "").trim() || "KAAD-lp Admin",
+    public_status_title: String(config.public_status_title || "").trim() || "Public Status",
     enabled: Boolean(config.enabled),
     scheme: config.scheme,
     host: config.host,
@@ -329,6 +361,574 @@ async function writeIcecastConfig(nextConfig) {
   await fs.writeFile(icecastConfigPath, `${JSON.stringify(normalized, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
   icecastConfigCache = normalized;
   return normalized;
+}
+
+function sanitizeStatsIp(ip) {
+  return String(ip || "").trim();
+}
+
+function isPrivateOrLocalIp(ip) {
+  const text = sanitizeStatsIp(ip);
+  if (!text) return true;
+  if (text === "127.0.0.1" || text === "::1" || text === "localhost") return true;
+  if (text.startsWith("10.")) return true;
+  if (text.startsWith("192.168.")) return true;
+  if (text.startsWith("169.254.")) return true;
+  if (text.startsWith("172.")) {
+    const second = Number(text.split(".")[1] || "0");
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (text.startsWith("fc") || text.startsWith("fd") || text.startsWith("fe80:")) return true;
+  return false;
+}
+
+async function loadListenerHistory() {
+  if (listenerHistoryCache) return listenerHistoryCache;
+  try {
+    const text = await fs.readFile(icecastListenerHistoryPath, "utf-8");
+    const parsed = JSON.parse(text);
+    listenerHistoryCache = Array.isArray(parsed?.items) ? parsed.items : [];
+    return listenerHistoryCache;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read listener history: ${error.message || String(error)}`);
+    }
+    listenerHistoryCache = [];
+    return listenerHistoryCache;
+  }
+}
+
+async function saveListenerHistory(nextItems) {
+  const items = Array.isArray(nextItems) ? nextItems : [];
+  const dir = pathModule.dirname(icecastListenerHistoryPath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    icecastListenerHistoryPath,
+    `${JSON.stringify({ updated_at: new Date().toISOString(), items }, null, 2)}\n`,
+    {
+      encoding: "utf-8",
+      mode: 0o600,
+    },
+  );
+  listenerHistoryCache = items;
+  return items;
+}
+
+async function loadGeoCache() {
+  if (geoCache) return geoCache;
+  try {
+    const text = await fs.readFile(icecastGeoCachePath, "utf-8");
+    const parsed = JSON.parse(text);
+    geoCache = parsed && typeof parsed === "object" ? parsed : {};
+    return geoCache;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read geo cache: ${error.message || String(error)}`);
+    }
+    geoCache = {};
+    return geoCache;
+  }
+}
+
+async function saveGeoCache(nextCache) {
+  const payload = nextCache && typeof nextCache === "object" ? nextCache : {};
+  const dir = pathModule.dirname(icecastGeoCachePath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(icecastGeoCachePath, `${JSON.stringify(payload, null, 2)}\n`, {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  geoCache = payload;
+  return geoCache;
+}
+
+async function fetchIcecastJsonStats(config) {
+  const endpoint = new URL(`${config.scheme}://${config.host}:${config.port}/status-json.xsl`);
+  const response = await fetch(endpoint, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "radiant-api/icecast-stats",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Icecast stats request failed (${response.status})`);
+  }
+  const payload = await response.json();
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Icecast stats response invalid");
+  }
+  return payload;
+}
+
+function extractMountsFromStats(statsPayload, fallbackMount) {
+  const raw = statsPayload?.icestats?.source;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const mounts = list
+    .map((item) => String(item?.listenurl || item?.server_name || item?.mount || ""))
+    .map((value) => {
+      if (!value) return "";
+      if (value.startsWith("/")) return value;
+      try {
+        const u = new URL(value);
+        return u.pathname || "";
+      } catch (_error) {
+        return "";
+      }
+    })
+    .filter(Boolean);
+  if (!mounts.length) return [`/${normalizeIcecastMount(fallbackMount)}`];
+  return [...new Set(mounts)];
+}
+
+async function fetchIcecastMountClients(config, mount) {
+  const endpoint = new URL(`${config.scheme}://${config.host}:${config.port}/admin/listclients`);
+  endpoint.searchParams.set("mount", mount);
+  const credentials = Buffer.from(`${config.username}:${config.password}`).toString("base64");
+  const response = await fetch(endpoint, {
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      Accept: "application/xml,text/xml,*/*",
+      "User-Agent": "radiant-api/icecast-stats",
+    },
+  });
+  if (!response.ok) {
+    return [];
+  }
+  const xml = await response.text();
+  const listeners = [];
+  const blocks = xml.match(/<listener\b[\s\S]*?<\/listener>/gi) || [];
+  for (const block of blocks) {
+    const ipMatch = block.match(/<IP>([^<]+)<\/IP>/i);
+    const uaMatch = block.match(/<UserAgent>([^<]+)<\/UserAgent>/i);
+    const connectedMatch = block.match(/<Connected>([^<]+)<\/Connected>/i);
+    const ip = sanitizeStatsIp(ipMatch?.[1] || "");
+    if (!ip || isPrivateOrLocalIp(ip)) continue;
+    listeners.push({
+      ip,
+      user_agent: uaMatch?.[1] ? String(uaMatch[1]).trim() : "",
+      connected_seconds: connectedMatch?.[1] ? Number(connectedMatch[1]) || 0 : 0,
+      mount,
+    });
+  }
+  return listeners;
+}
+
+async function fetchGeoFromIpwho(ip) {
+  const endpoint = new URL(`https://ipwho.is/${encodeURIComponent(ip)}`);
+  const response = await fetch(endpoint, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "radiant-api/icecast-geo",
+    },
+  });
+  if (!response.ok) throw new Error(`ipwho_status_${response.status}`);
+  const payload = await response.json();
+  if (!payload || payload.success === false) return null;
+
+  const lat = Number(payload.latitude);
+  const lon = Number(payload.longitude);
+  return {
+    country: payload.country || null,
+    country_code: payload.country_code || null,
+    region: payload.region || null,
+    city: payload.city || null,
+    latitude: Number.isFinite(lat) ? lat : null,
+    longitude: Number.isFinite(lon) ? lon : null,
+    provider: "ipwho.is",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function fetchGeoFromIpApi(ip) {
+  const endpoint = new URL(`http://ip-api.com/json/${encodeURIComponent(ip)}`);
+  endpoint.searchParams.set("fields", "status,message,country,countryCode,regionName,city,lat,lon");
+  const response = await fetch(endpoint, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "radiant-api/icecast-geo",
+    },
+  });
+  if (!response.ok) throw new Error(`ipapi_status_${response.status}`);
+  const payload = await response.json();
+  if (!payload || payload.status !== "success") return null;
+
+  const lat = Number(payload.lat);
+  const lon = Number(payload.lon);
+  return {
+    country: payload.country || null,
+    country_code: payload.countryCode || null,
+    region: payload.regionName || null,
+    city: payload.city || null,
+    latitude: Number.isFinite(lat) ? lat : null,
+    longitude: Number.isFinite(lon) ? lon : null,
+    provider: "ip-api.com",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function lookupGeoForIp(ip) {
+  const clean = sanitizeStatsIp(ip);
+  if (!clean || isPrivateOrLocalIp(clean)) return null;
+  const cache = await loadGeoCache();
+  const cached = cache[clean];
+  if (cached) {
+    const cachedAt = new Date(cached.updated_at || "").getTime();
+    const ageMs = Number.isFinite(cachedAt) ? Date.now() - cachedAt : Number.POSITIVE_INFINITY;
+    const ttlMs = cached.failed ? icecastGeoCacheFailureTtlMs : icecastGeoCacheSuccessTtlMs;
+    if (ageMs >= 0 && ageMs < ttlMs) {
+      return cached;
+    }
+  }
+
+  const providers = [fetchGeoFromIpwho, fetchGeoFromIpApi];
+  for (const provider of providers) {
+    try {
+      const resolved = await provider(clean);
+      if (!resolved) continue;
+      cache[clean] = resolved;
+      await saveGeoCache(cache);
+      return resolved;
+    } catch (_error) {
+      // try next provider
+    }
+  }
+
+  const next = {
+    country: null,
+    country_code: null,
+    region: null,
+    city: null,
+    latitude: null,
+    longitude: null,
+    updated_at: new Date().toISOString(),
+    failed: true,
+  };
+  cache[clean] = next;
+  await saveGeoCache(cache);
+  return next;
+}
+
+function aggregateGeoRows(rows, granularity = "country") {
+  const mode = ["country", "region", "city"].includes(granularity) ? granularity : "country";
+  const buckets = new Map();
+  for (const row of rows) {
+    const rawLat = row?.latitude;
+    const rawLon = row?.longitude;
+    if (rawLat == null || rawLon == null || rawLat === "" || rawLon === "") continue;
+    const lat = Number(rawLat);
+    const lon = Number(rawLon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const country = row.country || "Unknown";
+    const countryCode = row.country_code || "??";
+    const region = row.region || null;
+    const city = row.city || null;
+
+    let key = countryCode;
+    let label = country;
+    if (mode === "region") {
+      key = `${countryCode}|${normalizeText(region || "unknown")}`;
+      label = region || country;
+    } else if (mode === "city") {
+      key = `${countryCode}|${normalizeText(region || "unknown")}|${normalizeText(city || "unknown")}|${lat.toFixed(2)}|${lon.toFixed(2)}`;
+      label = city || region || country;
+    }
+
+    const current = buckets.get(key) || {
+      country,
+      country_code: countryCode,
+      region,
+      city,
+      label,
+      latitude_sum: 0,
+      longitude_sum: 0,
+      listeners: 0,
+      ips: new Set(),
+    };
+    current.latitude_sum += lat;
+    current.longitude_sum += lon;
+    current.listeners += 1;
+    if (row.ip) current.ips.add(row.ip);
+    buckets.set(key, current);
+  }
+
+  return [...buckets.values()]
+    .map((item) => ({
+      country: item.country,
+      country_code: item.country_code,
+      region: item.region,
+      city: item.city,
+      label: item.label,
+      latitude: item.listeners > 0 ? Number((item.latitude_sum / item.listeners).toFixed(4)) : null,
+      longitude: item.listeners > 0 ? Number((item.longitude_sum / item.listeners).toFixed(4)) : null,
+      listeners: item.listeners,
+      unique_ips: item.ips.size,
+    }))
+    .sort((a, b) => b.unique_ips - a.unique_ips);
+}
+
+async function collectIcecastListenerSnapshot() {
+  const config = await loadIcecastConfig();
+  if (!config.host || !config.password) {
+    const snapshot = {
+      enabled: false,
+      reason: !config.host ? "missing_host" : "missing_password",
+      summary: null,
+      listeners: [],
+    };
+    latestIcecastSnapshot = snapshot;
+    latestIcecastSnapshotAtMs = Date.now();
+    return snapshot;
+  }
+
+  const stats = await fetchIcecastJsonStats(config);
+  const mounts = extractMountsFromStats(stats, config.mount);
+  const listeners = [];
+  for (const mount of mounts) {
+    const items = await fetchIcecastMountClients(config, mount);
+    listeners.push(...items);
+  }
+
+  const nowIso = new Date().toISOString();
+  const history = await loadListenerHistory();
+  const nextHistory = [...history];
+  let historyChanged = false;
+
+  for (const listener of listeners) {
+    const geo = await lookupGeoForIp(listener.ip);
+    const existingRecent = [...nextHistory]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.ip === listener.ip &&
+          entry.mount === listener.mount &&
+          Math.abs(new Date(nowIso).getTime() - new Date(entry.ts).getTime()) <= 15 * 60 * 1000,
+      );
+    if (existingRecent) {
+      const hasGeo = existingRecent.latitude != null && existingRecent.longitude != null;
+      const nextHasGeo = geo?.latitude != null && geo?.longitude != null;
+      if (!hasGeo && nextHasGeo) {
+        existingRecent.country = geo.country || existingRecent.country || null;
+        existingRecent.country_code = geo.country_code || existingRecent.country_code || null;
+        existingRecent.region = geo.region || existingRecent.region || null;
+        existingRecent.city = geo.city || existingRecent.city || null;
+        existingRecent.latitude = geo.latitude;
+        existingRecent.longitude = geo.longitude;
+        historyChanged = true;
+      }
+      if (
+        nextHasGeo &&
+        hasGeo &&
+        (Number(existingRecent.latitude) !== Number(geo.latitude) || Number(existingRecent.longitude) !== Number(geo.longitude))
+      ) {
+        nextHistory.push({
+          ts: nowIso,
+          ip: listener.ip,
+          mount: listener.mount,
+          user_agent: listener.user_agent || "",
+          country: geo.country || null,
+          country_code: geo.country_code || null,
+          region: geo.region || null,
+          city: geo.city || null,
+          latitude: geo.latitude || null,
+          longitude: geo.longitude || null,
+        });
+        historyChanged = true;
+      }
+      continue;
+    }
+    nextHistory.push({
+      ts: nowIso,
+      ip: listener.ip,
+      mount: listener.mount,
+      user_agent: listener.user_agent || "",
+      country: geo?.country || null,
+      country_code: geo?.country_code || null,
+      region: geo?.region || null,
+      city: geo?.city || null,
+      latitude: geo?.latitude || null,
+      longitude: geo?.longitude || null,
+    });
+  }
+
+  if (nextHistory.length !== history.length || historyChanged) {
+    await saveListenerHistory(nextHistory);
+  }
+
+  const snapshot = {
+    enabled: true,
+    reason: "ok",
+    summary: stats,
+    listeners,
+    mounts,
+    collected_at: nowIso,
+  };
+  latestIcecastSnapshot = snapshot;
+  latestIcecastSnapshotAtMs = Date.now();
+  return snapshot;
+}
+
+async function refreshIcecastSnapshot() {
+  if (icecastSnapshotInFlight) return icecastSnapshotInFlight;
+  icecastSnapshotInFlight = (async () => {
+    try {
+      return await collectIcecastListenerSnapshot();
+    } finally {
+      icecastSnapshotInFlight = null;
+    }
+  })();
+  return icecastSnapshotInFlight;
+}
+
+function isSnapshotFresh() {
+  return Boolean(latestIcecastSnapshot) && Date.now() - latestIcecastSnapshotAtMs <= Math.max(1000, icecastSnapshotCacheMs);
+}
+
+async function getIcecastSnapshotForRead() {
+  if (isSnapshotFresh()) {
+    return latestIcecastSnapshot;
+  }
+  if (latestIcecastSnapshot) {
+    refreshIcecastSnapshot().catch(() => {
+      // best-effort background refresh
+    });
+    return latestIcecastSnapshot;
+  }
+  return refreshIcecastSnapshot();
+}
+
+async function enrichListenerHistoryGeo(maxIpsPerRun = 20) {
+  const history = await loadListenerHistory();
+  if (!history.length) return 0;
+
+  const missingByIp = new Map();
+  for (const row of history) {
+    if (!row?.ip) continue;
+    const hasGeo = row.latitude != null && row.longitude != null;
+    if (hasGeo) continue;
+    missingByIp.set(row.ip, true);
+  }
+
+  const targetIps = [...missingByIp.keys()].slice(0, Math.max(1, Number(maxIpsPerRun) || 20));
+  if (!targetIps.length) return 0;
+
+  let changed = 0;
+  for (const ip of targetIps) {
+    const geo = await lookupGeoForIp(ip);
+    const hasGeo = geo && geo.latitude != null && geo.longitude != null;
+    if (!hasGeo) continue;
+    for (const row of history) {
+      if (row.ip !== ip) continue;
+      if (row.latitude != null && row.longitude != null) continue;
+      row.country = geo.country || row.country || null;
+      row.country_code = geo.country_code || row.country_code || null;
+      row.region = geo.region || row.region || null;
+      row.city = geo.city || row.city || null;
+      row.latitude = geo.latitude;
+      row.longitude = geo.longitude;
+      changed += 1;
+    }
+  }
+
+  if (changed > 0) {
+    await saveListenerHistory(history);
+  }
+  return changed;
+}
+
+function summarizeIcecastStats(snapshot, history) {
+  const icestats = snapshot?.summary?.icestats || {};
+  const rawSources = icestats?.source;
+  const sourceRows = Array.isArray(rawSources) ? rawSources : rawSources ? [rawSources] : [];
+  const targetMounts = new Set((snapshot?.mounts || []).map((mount) => String(mount || "").trim()).filter(Boolean));
+  let streamStartIso = null;
+
+  for (const row of sourceRows) {
+    const listenurl = String(row?.listenurl || "").trim();
+    let rowMount = String(row?.mount || "").trim();
+    if (!rowMount && listenurl) {
+      try {
+        rowMount = new URL(listenurl).pathname || "";
+      } catch (_error) {
+        rowMount = "";
+      }
+    }
+    const matchesTarget = targetMounts.size === 0 || (rowMount && targetMounts.has(rowMount));
+    if (!matchesTarget) continue;
+    streamStartIso = toIsoDateTime(row?.stream_start_iso8601 || row?.stream_start);
+    if (streamStartIso) break;
+  }
+
+  if (!streamStartIso) {
+    for (const row of sourceRows) {
+      streamStartIso = toIsoDateTime(row?.stream_start_iso8601 || row?.stream_start);
+      if (streamStartIso) break;
+    }
+  }
+
+  const serverStartIso = toIsoDateTime(icestats.server_start_iso8601);
+  const uptimeStartIso = streamStartIso || serverStartIso;
+  const currentListeners = Number(icestats.listeners || snapshot.listeners.length || 0);
+  const now = Date.now();
+  const last24Cutoff = now - 24 * 60 * 60 * 1000;
+  const last24Ips = new Set();
+  const allIps = new Set();
+  for (const row of history) {
+    if (!row?.ip) continue;
+    allIps.add(row.ip);
+    const ts = new Date(row.ts || "").getTime();
+    if (Number.isFinite(ts) && ts >= last24Cutoff) {
+      last24Ips.add(row.ip);
+    }
+  }
+
+  return {
+    collected_at: snapshot?.collected_at || new Date().toISOString(),
+    uptime_seconds: uptimeStartIso ? Math.max(0, Math.round((Date.now() - new Date(uptimeStartIso).getTime()) / 1000)) : null,
+    stream_start_iso8601: streamStartIso,
+    server_start_iso8601: serverStartIso,
+    current_listeners: currentListeners,
+    source_count: Number(icestats.sources || 0),
+    mount_count: Number(snapshot?.mounts?.length || 0),
+    unique_listeners_24h: last24Ips.size,
+    unique_listeners_all_time: allIps.size,
+  };
+}
+
+function filterHistoryByRange(history, range, currentIps) {
+  const now = Date.now();
+  if (range === "current") {
+    const currentSet = new Set((currentIps || []).map((item) => item.ip).filter(Boolean));
+    return history.filter((row) => row.ip && currentSet.has(row.ip));
+  }
+  if (range === "24h") {
+    const cutoff = now - 24 * 60 * 60 * 1000;
+    return history.filter((row) => {
+      const ts = new Date(row.ts || "").getTime();
+      return Number.isFinite(ts) && ts >= cutoff;
+    });
+  }
+  return history;
+}
+
+function startIcecastCollectorLoop() {
+  if (icecastCollectorStarted) return;
+  icecastCollectorStarted = true;
+
+  const run = async () => {
+    if (icecastCollectorBusy) return;
+    icecastCollectorBusy = true;
+    try {
+      await refreshIcecastSnapshot();
+      await enrichListenerHistoryGeo(20);
+    } catch (_error) {
+      // best-effort collector
+    } finally {
+      icecastCollectorBusy = false;
+    }
+  };
+
+  setInterval(run, 60 * 1000);
+  run();
 }
 
 function buildIcecastSongText({ artist = "", title = "", showTitle = "" }) {
@@ -1807,6 +2407,9 @@ const server = http.createServer((req, res) => {
           `/${apiVersion}/shows/:slug`,
           `/${apiVersion}/djs/:slug`,
           `/${apiVersion}/playlist/recent`,
+          `/${apiVersion}/status/site-settings`,
+          `/${apiVersion}/status/icecast/summary`,
+          `/${apiVersion}/status/icecast/geo`,
           `/${apiVersion}/admin/shows (internal)`,
           `/${apiVersion}/admin/shows/:id/insights (internal)`,
           `/${apiVersion}/admin/djs (internal)`,
@@ -1816,8 +2419,87 @@ const server = http.createServer((req, res) => {
           `/${apiVersion}/admin/schedule/slots (internal)`,
           `/${apiVersion}/admin/settings/icecast (internal)`,
           `/${apiVersion}/admin/settings/icecast/test (internal)`,
+          `/${apiVersion}/admin/stats/icecast/summary (internal)`,
+          `/${apiVersion}/admin/stats/icecast/geo (internal)`,
           `/${apiVersion}/acrcloud/callback (internal)`,
         ],
+      },
+      corsHeaders,
+    );
+  }
+
+  if (path === `/${apiVersion}/status/icecast/summary` && req.method === "GET") {
+    const snapshot = await getIcecastSnapshotForRead();
+    if (!snapshot.enabled) {
+      return sendJson(
+        res,
+        200,
+        {
+          enabled: false,
+          reason: snapshot.reason,
+          summary: null,
+        },
+        corsHeaders,
+      );
+    }
+    const history = await loadListenerHistory();
+    return sendJson(
+      res,
+      200,
+      {
+        enabled: true,
+        summary: summarizeIcecastStats(snapshot, history),
+      },
+      corsHeaders,
+    );
+  }
+
+  if (path === `/${apiVersion}/status/icecast/geo` && req.method === "GET") {
+    const rangeRaw = String(requestUrl.searchParams.get("range") || "current").trim().toLowerCase();
+    const range = rangeRaw === "24h" || rangeRaw === "all" ? rangeRaw : "current";
+    const granularityRaw = String(requestUrl.searchParams.get("granularity") || "country").trim().toLowerCase();
+    const granularity = ["country", "region", "city"].includes(granularityRaw) ? granularityRaw : "country";
+    const snapshot = await getIcecastSnapshotForRead();
+    if (!snapshot.enabled) {
+      return sendJson(
+        res,
+        200,
+        {
+          enabled: false,
+          reason: snapshot.reason,
+          range,
+          granularity,
+          items: [],
+        },
+        corsHeaders,
+      );
+    }
+    const history = await loadListenerHistory();
+    const rows = filterHistoryByRange(history, range, snapshot.listeners || []);
+    return sendJson(
+      res,
+      200,
+      {
+        enabled: true,
+        range,
+        granularity,
+        items: aggregateGeoRows(rows, granularity),
+        listeners_considered: rows.length,
+      },
+      corsHeaders,
+    );
+  }
+
+  if (path === `/${apiVersion}/status/site-settings` && req.method === "GET") {
+    const config = await loadIcecastConfig();
+    return sendJson(
+      res,
+      200,
+      {
+        item: {
+          public_status_title: String(config.public_status_title || "").trim() || "Public Status",
+          admin_title: String(config.admin_title || "").trim() || "KAAD-lp Admin",
+        },
       },
       corsHeaders,
     );
@@ -1902,6 +2584,8 @@ const server = http.createServer((req, res) => {
       const keepPassword = body?.password == null || String(body.password) === "";
       const next = normalizeIcecastConfig(
         {
+          admin_title: body?.admin_title,
+          public_status_title: body?.public_status_title,
           enabled: body?.enabled,
           scheme: body?.scheme,
           host: body?.host,
@@ -1950,6 +2634,68 @@ const server = http.createServer((req, res) => {
           now_playing_source: snapshot.source,
           song: songText,
           push: pushResult,
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/stats/icecast/summary` && req.method === "GET") {
+      const snapshot = await getIcecastSnapshotForRead();
+      if (!snapshot.enabled) {
+        return sendJson(
+          res,
+          200,
+          {
+            enabled: false,
+            reason: snapshot.reason,
+            summary: null,
+          },
+          corsHeaders,
+        );
+      }
+      const history = await loadListenerHistory();
+      return sendJson(
+        res,
+        200,
+        {
+          enabled: true,
+          summary: summarizeIcecastStats(snapshot, history),
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/stats/icecast/geo` && req.method === "GET") {
+      const rangeRaw = String(requestUrl.searchParams.get("range") || "current").trim().toLowerCase();
+      const range = rangeRaw === "24h" || rangeRaw === "all" ? rangeRaw : "current";
+      const granularityRaw = String(requestUrl.searchParams.get("granularity") || "country").trim().toLowerCase();
+      const granularity = ["country", "region", "city"].includes(granularityRaw) ? granularityRaw : "country";
+      const snapshot = await getIcecastSnapshotForRead();
+      if (!snapshot.enabled) {
+        return sendJson(
+          res,
+          200,
+          {
+            enabled: false,
+            reason: snapshot.reason,
+            range,
+            granularity,
+            items: [],
+          },
+          corsHeaders,
+        );
+      }
+      const history = await loadListenerHistory();
+      const rows = filterHistoryByRange(history, range, snapshot.listeners || []);
+      return sendJson(
+        res,
+        200,
+        {
+          enabled: true,
+          range,
+          granularity,
+          items: aggregateGeoRows(rows, granularity),
+          listeners_considered: rows.length,
         },
         corsHeaders,
       );
@@ -2232,5 +2978,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, () => {
+  startIcecastCollectorLoop();
   process.stdout.write(`Radiant API listening on ${port}\n`);
 });

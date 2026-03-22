@@ -141,6 +141,34 @@ export const apiAdapter = {
       body: JSON.stringify({}),
     });
   },
+  getAdminIcecastStatsSummary() {
+    return request("/v1/admin/stats/icecast/summary", { method: "GET" });
+  },
+  getNowPlaying() {
+    return request("/v1/now-playing", { method: "GET" });
+  },
+  getPublicIcecastStatsSummary() {
+    return request("/v1/status/icecast/summary", { method: "GET" });
+  },
+  getPublicSiteSettings() {
+    return request("/v1/status/site-settings", { method: "GET" });
+  },
+  getAdminIcecastGeo(range = "current", granularity = "country") {
+    const safeRange = ["current", "24h", "all"].includes(range) ? range : "current";
+    const safeGranularity = ["country", "region", "city"].includes(granularity) ? granularity : "country";
+    return request(
+      `/v1/admin/stats/icecast/geo?range=${encodeURIComponent(safeRange)}&granularity=${encodeURIComponent(safeGranularity)}`,
+      { method: "GET" },
+    );
+  },
+  getPublicIcecastGeo(range = "current", granularity = "country") {
+    const safeRange = ["current", "24h", "all"].includes(range) ? range : "current";
+    const safeGranularity = ["country", "region", "city"].includes(granularity) ? granularity : "country";
+    return request(
+      `/v1/status/icecast/geo?range=${encodeURIComponent(safeRange)}&granularity=${encodeURIComponent(safeGranularity)}`,
+      { method: "GET" },
+    );
+  },
   createScheduleSlot(payload) {
     return request("/v1/admin/schedule/slots", {
       method: "POST",

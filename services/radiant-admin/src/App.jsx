@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { geoGraticule10, geoNaturalEarth1, geoPath } from "d3-geo";
+import { feature } from "topojson-client";
+import countries110m from "world-atlas/countries-110m.json";
 import { apiAdapter } from "./lib/apiAdapter";
 
 const DAYS = [
@@ -1149,14 +1152,418 @@ function ReportingTab() {
   );
 }
 
-function SettingsTab() {
+function StatsTab({ mode = "admin" }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [range, setRange] = useState("current");
+  const [summary, setSummary] = useState(null);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [geoItems, setGeoItems] = useState([]);
+  const [statsEnabled, setStatsEnabled] = useState(true);
+  const [disabledReason, setDisabledReason] = useState("");
+  const [zoomState, setZoomState] = useState({ k: 1, x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [dragOrigin, setDragOrigin] = useState(null);
+  const mapViewportRef = useRef(null);
+  const hasLoadedInitialStatsRef = useRef(false);
+
+  async function requestStatsFallback(path) {
+    const token = import.meta.env.VITE_ADMIN_TOKEN || "";
+    const configured = (import.meta.env.VITE_API_BASE_URL || "").trim();
+    const { protocol, hostname } = window.location;
+    const inferredHost = hostname.includes("admin")
+      ? hostname.replace("admin.", "api.").replace("-admin.", "-api.").replace("admin-", "api-")
+      : hostname;
+    const inferredBase = `${protocol}//${inferredHost}`;
+    const apiBase = configured && !/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(configured) ? configured : inferredBase;
+
+    const response = await fetch(`${apiBase}${path}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "X-RADIANT-ADMIN-TOKEN": token } : {}),
+      },
+    });
+
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_error) {
+      data = { message: text.slice(0, 200) };
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || `Request failed (${response.status})`);
+    }
+    return data;
+  }
+
+  const maxGeoCount = useMemo(() => {
+    const counts = geoItems.map((item) => Number(item.unique_ips || 0));
+    return counts.length ? Math.max(...counts, 1) : 1;
+  }, [geoItems]);
+
+  const geoGranularity = useMemo(() => {
+    if (zoomState.k >= 4) return "city";
+    if (zoomState.k >= 2) return "region";
+    return "country";
+  }, [zoomState.k]);
+
+  const mapProjection = useMemo(
+    () => geoNaturalEarth1().fitExtent([[16, 16], [984, 484]], { type: "Sphere" }),
+    [],
+  );
+  const mapPath = useMemo(() => geoPath(mapProjection), [mapProjection]);
+  const mapSpherePath = useMemo(() => mapPath({ type: "Sphere" }) || "", [mapPath]);
+  const mapGraticulePath = useMemo(() => mapPath(geoGraticule10()) || "", [mapPath]);
+  const landGeometries = useMemo(() => {
+    const topology = countries110m;
+    return feature(topology, topology.objects.countries).features;
+  }, []);
+
+  const geoDots = useMemo(() => {
+    return geoItems
+      .map((item, index) => {
+        const lat = Number(item.latitude);
+        const lon = Number(item.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const projected = mapProjection([lon, lat]);
+        if (!projected) return null;
+        const count = Number(item.unique_ips || 0);
+        const radius = Math.max(5, Math.round((count / maxGeoCount) * 16));
+        return {
+          key: `${item.country_code || "xx"}-${index}`,
+          country: item.country || "Unknown",
+          region: item.region || null,
+          city: item.city || null,
+          label: item.label || item.city || item.region || item.country || "Unknown",
+          count,
+          x: projected[0],
+          y: projected[1],
+          radius,
+        };
+      })
+      .filter(Boolean);
+  }, [geoItems, mapProjection, maxGeoCount]);
+
+  async function loadStats(targetRange = range, targetGranularity = geoGranularity, includeSummary = true) {
+    setLoading(true);
+    setError("");
+    try {
+      const geoRequest =
+        mode === "public"
+          ? typeof apiAdapter.getPublicIcecastGeo === "function"
+            ? apiAdapter.getPublicIcecastGeo(targetRange, targetGranularity)
+            : requestStatsFallback(
+                `/v1/status/icecast/geo?range=${encodeURIComponent(targetRange)}&granularity=${encodeURIComponent(targetGranularity)}`,
+              )
+          : typeof apiAdapter.getAdminIcecastGeo === "function"
+            ? apiAdapter.getAdminIcecastGeo(targetRange, targetGranularity)
+            : requestStatsFallback(
+              `/v1/admin/stats/icecast/geo?range=${encodeURIComponent(targetRange)}&granularity=${encodeURIComponent(targetGranularity)}`,
+            );
+      const nowPlayingRequest =
+        typeof apiAdapter.getNowPlaying === "function"
+          ? apiAdapter.getNowPlaying()
+          : requestStatsFallback("/v1/now-playing");
+
+      let summaryPayload = null;
+      let geoPayload = null;
+      let nowPlayingPayload = null;
+      if (includeSummary) {
+        const summaryRequest =
+          mode === "public"
+            ? typeof apiAdapter.getPublicIcecastStatsSummary === "function"
+              ? apiAdapter.getPublicIcecastStatsSummary()
+              : requestStatsFallback("/v1/status/icecast/summary")
+            : typeof apiAdapter.getAdminIcecastStatsSummary === "function"
+              ? apiAdapter.getAdminIcecastStatsSummary()
+              : requestStatsFallback("/v1/admin/stats/icecast/summary");
+        [summaryPayload, geoPayload, nowPlayingPayload] = await Promise.all([summaryRequest, geoRequest, nowPlayingRequest]);
+      } else {
+        geoPayload = await geoRequest;
+      }
+
+      const enabled = Boolean(summaryPayload?.enabled);
+      if (includeSummary) {
+        setStatsEnabled(enabled);
+        setDisabledReason(enabled ? "" : String(summaryPayload?.reason || geoPayload?.reason || "disabled"));
+        setSummary(summaryPayload?.summary || null);
+        setNowPlaying(nowPlayingPayload || null);
+      }
+      setGeoItems(Array.isArray(geoPayload?.items) ? geoPayload.items : []);
+      setRange(targetRange);
+    } catch (loadError) {
+      setError(loadError.message || "Failed to load listener stats.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    hasLoadedInitialStatsRef.current = true;
+    loadStats("current", geoGranularity, true);
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadStats(range, geoGranularity, true);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [range, geoGranularity]);
+
+  useEffect(() => {
+    if (!hasLoadedInitialStatsRef.current) return;
+    loadStats(range, geoGranularity, false);
+  }, [geoGranularity]);
+
+  function zoomAtClientPoint(clientX, clientY, factor, centerOnTarget = false) {
+    const node = mapViewportRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+
+    setZoomState((previous) => {
+      const safeFactor = Number.isFinite(factor) && factor > 0 ? factor : 1;
+      const nextK = clamp(previous.k * safeFactor, 1, 8);
+      const worldX = (px - previous.x) / previous.k;
+      const worldY = (py - previous.y) / previous.k;
+      const targetX = centerOnTarget ? rect.width / 2 : px;
+      const targetY = centerOnTarget ? rect.height / 2 : py;
+      const nextX = targetX - worldX * nextK;
+      const nextY = targetY - worldY * nextK;
+      return {
+        k: nextK,
+        x: nextX,
+        y: nextY,
+      };
+    });
+  }
+
+  function zoomBy(factor) {
+    const node = mapViewportRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    zoomAtClientPoint(cx, cy, factor);
+  }
+
+  function resetZoom() {
+    setZoomState({ k: 1, x: 0, y: 0 });
+  }
+
+  function handleDoubleClick(event) {
+    event.preventDefault();
+    zoomAtClientPoint(event.clientX, event.clientY, 1.6, true);
+  }
+
+  function handlePointerDown(event) {
+    const node = mapViewportRef.current;
+    if (!node) return;
+    node.setPointerCapture(event.pointerId);
+    setDragging(true);
+    setDragOrigin({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: zoomState.x,
+      originY: zoomState.y,
+    });
+  }
+
+  function handlePointerMove(event) {
+    if (!dragging || !dragOrigin || dragOrigin.pointerId !== event.pointerId) return;
+    const dx = event.clientX - dragOrigin.startX;
+    const dy = event.clientY - dragOrigin.startY;
+    setZoomState((previous) => ({
+      ...previous,
+      x: dragOrigin.originX + dx,
+      y: dragOrigin.originY + dy,
+    }));
+  }
+
+  function handlePointerUp(event) {
+    const node = mapViewportRef.current;
+    if (node && dragOrigin?.pointerId === event.pointerId) {
+      try {
+        node.releasePointerCapture(event.pointerId);
+      } catch (_error) {
+        // noop
+      }
+    }
+    setDragging(false);
+    setDragOrigin(null);
+  }
+
+  const uptimeText = summary?.uptime_seconds
+    ? `${Math.floor(summary.uptime_seconds / 3600)}h ${Math.floor((summary.uptime_seconds % 3600) / 60)}m`
+    : "n/a";
+  const currentShowTitle = nowPlaying?.show?.title || "No live show";
+  const currentTrackTitle = nowPlaying?.track
+    ? `${nowPlaying.track.artist || "Unknown Artist"} - ${nowPlaying.track.title || "Unknown Track"}`
+    : "No track detected";
+
+  return (
+    <section className="stats-shell">
+      <h2>Stats</h2>
+      <p className="subhead">Live listener telemetry from Icecast plus geo tracking from now onward.</p>
+
+      {error ? <p className="status-bad">{error}</p> : null}
+      {!error && !statsEnabled ? (
+        <p className="status-bad">Icecast stats are unavailable right now ({disabledReason || "configuration incomplete"}).</p>
+      ) : null}
+
+      <div className="status-now-row">
+        <article className="status-now-card">
+          <h3>Current Show</h3>
+          <p>{currentShowTitle}</p>
+        </article>
+        <article className="status-now-card">
+          <h3>Now Playing</h3>
+          <p>{currentTrackTitle}</p>
+        </article>
+      </div>
+
+      <div className="stats-row">
+        <article className="stat-card">
+          <h3>Current Listeners</h3>
+          <p>{summary?.current_listeners ?? "-"}</p>
+        </article>
+        <article className="stat-card">
+          <h3>Stream Uptime</h3>
+          <p>{uptimeText}</p>
+        </article>
+        <article className="stat-card">
+          <h3>Unique 24h</h3>
+          <p>{summary?.unique_listeners_24h ?? "-"}</p>
+        </article>
+        <article className="stat-card">
+          <h3>Unique All Time</h3>
+          <p>{summary?.unique_listeners_all_time ?? "-"}</p>
+        </article>
+      </div>
+
+      <div className="stats-toolbar">
+        <div className="range-pills">
+          {[
+            { key: "current", label: "Current" },
+            { key: "24h", label: "Last 24h" },
+            { key: "all", label: "All Time" },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={range === item.key ? "ghost active" : "ghost"}
+              onClick={() => loadStats(item.key)}
+              disabled={loading}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="stats-actions">
+          <span className="granularity-chip">{geoGranularity}</span>
+          <button className="ghost" type="button" onClick={() => loadStats(range, geoGranularity, true)} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      <div className="geo-panel">
+        <div
+          ref={mapViewportRef}
+          className={dragging ? "geo-map is-dragging" : "geo-map"}
+          aria-label="Listener geo map"
+          onDoubleClick={handleDoubleClick}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        >
+          <svg className="geo-map-svg" viewBox="0 0 1000 500" role="img" aria-label="World map with listener locations">
+            <g transform={`translate(${zoomState.x} ${zoomState.y}) scale(${zoomState.k})`}>
+              <rect x="0" y="0" width="1000" height="500" className="geo-ocean" />
+
+              <path className="geo-sphere" d={mapSpherePath} />
+              <path className="geo-graticule-path" d={mapGraticulePath} />
+
+              <g className="geo-land">
+                {landGeometries.map((shape, index) => {
+                  const d = mapPath(shape);
+                  if (!d) return null;
+                  return <path key={`land-${index}`} d={d} />;
+                })}
+              </g>
+
+              <g className="geo-points">
+                {geoDots.map((dot) => (
+                  <circle key={dot.key} cx={dot.x} cy={dot.y} r={dot.radius / Math.sqrt(zoomState.k)} className="geo-dot">
+                    <title>{`${dot.label}: ${dot.count}`}</title>
+                  </circle>
+                ))}
+              </g>
+            </g>
+          </svg>
+
+          <div
+            className="map-controls"
+            aria-label="Map controls"
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="map-control"
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                zoomBy(1.25);
+              }}
+              aria-label="Zoom in map"
+            >
+              +
+            </button>
+            <button
+              className="map-control"
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                zoomBy(0.8);
+              }}
+              aria-label="Zoom out map"
+            >
+              -
+            </button>
+            <button
+              className="map-control reset"
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                resetZoom();
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SettingsTab({ onSiteTitlesChange }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const [testInfo, setTestInfo] = useState("");
   const [form, setForm] = useState({
+    admin_title: "KAAD-lp Admin",
+    public_status_title: "Public Status",
     enabled: false,
     scheme: "http",
     host: "",
@@ -1176,6 +1583,8 @@ function SettingsTab() {
       const item = payload?.item || {};
       setForm((previous) => ({
         ...previous,
+        admin_title: item.admin_title || "KAAD-lp Admin",
+        public_status_title: item.public_status_title || "Public Status",
         enabled: Boolean(item.enabled),
         scheme: item.scheme === "https" ? "https" : "http",
         host: item.host || "",
@@ -1185,6 +1594,12 @@ function SettingsTab() {
         password: "",
         password_set: Boolean(item.password_set),
       }));
+      if (typeof onSiteTitlesChange === "function") {
+        onSiteTitlesChange({
+          adminTitle: item.admin_title || "KAAD-lp Admin",
+          publicStatusTitle: item.public_status_title || "Public Status",
+        });
+      }
     } catch (loadError) {
       setError(loadError.message || "Failed to load Icecast settings.");
     } finally {
@@ -1200,9 +1615,10 @@ function SettingsTab() {
     setSaving(true);
     setError("");
     setInfo("");
-    setTestInfo("");
     try {
       const payload = await apiAdapter.updateAdminIcecastSettings({
+        admin_title: form.admin_title,
+        public_status_title: form.public_status_title,
         enabled: form.enabled,
         scheme: form.scheme,
         host: form.host,
@@ -1214,6 +1630,8 @@ function SettingsTab() {
       const item = payload?.item || {};
       setForm((previous) => ({
         ...previous,
+        admin_title: item.admin_title || "KAAD-lp Admin",
+        public_status_title: item.public_status_title || "Public Status",
         enabled: Boolean(item.enabled),
         scheme: item.scheme === "https" ? "https" : "http",
         host: item.host || "",
@@ -1223,6 +1641,12 @@ function SettingsTab() {
         password: "",
         password_set: Boolean(item.password_set),
       }));
+      if (typeof onSiteTitlesChange === "function") {
+        onSiteTitlesChange({
+          adminTitle: item.admin_title || "KAAD-lp Admin",
+          publicStatusTitle: item.public_status_title || "Public Status",
+        });
+      }
       setInfo("Icecast settings saved.");
     } catch (saveError) {
       setError(saveError.message || "Failed to save Icecast settings.");
@@ -1231,108 +1655,122 @@ function SettingsTab() {
     }
   }
 
-  async function handleTest() {
-    setTesting(true);
-    setError("");
-    setTestInfo("");
-    try {
-      const payload = await apiAdapter.testAdminIcecastSettings();
-      const song = payload?.song ? ` (${payload.song})` : "";
-      setTestInfo(`Icecast update test succeeded${song}.`);
-    } catch (testError) {
-      setError(testError.message || "Icecast test failed.");
-    } finally {
-      setTesting(false);
-    }
-  }
-
   return (
     <section className="settings-shell">
       <h2>Settings</h2>
-      <p className="subhead">Configure Icecast metadata updates from Radiant API now-playing data.</p>
+      <p className="subhead">Configure site branding and stream connection details used by metadata and listener stats.</p>
 
       {loading ? <p>Loading settings...</p> : null}
       {error ? <p className="status-bad">{error}</p> : null}
       {info ? <p className="status-good">{info}</p> : null}
-      {testInfo ? <p className="status-good">{testInfo}</p> : null}
 
-      <div className="settings-grid">
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={Boolean(form.enabled)}
-            onChange={(event) => setForm((previous) => ({ ...previous, enabled: event.target.checked }))}
-          />
-          Enable Icecast metadata updates
-        </label>
+      <div className="settings-cards">
+        <article className="settings-card site-settings-card">
+          <h3>Site Settings</h3>
+          <p className="subhead">Branding used across the admin shell.</p>
+          <div className="settings-grid site-settings-grid">
+            <label>
+              Site Title
+              <input
+                type="text"
+                value={form.admin_title}
+                onChange={(event) => setForm((previous) => ({ ...previous, admin_title: event.target.value }))}
+                placeholder="KAAD-lp Admin"
+              />
+            </label>
 
-        <label>
-          Scheme
-          <select value={form.scheme} onChange={(event) => setForm((previous) => ({ ...previous, scheme: event.target.value }))}>
-            <option value="http">http</option>
-            <option value="https">https</option>
-          </select>
-        </label>
+            <label>
+              Public Status Title
+              <input
+                type="text"
+                value={form.public_status_title}
+                onChange={(event) => setForm((previous) => ({ ...previous, public_status_title: event.target.value }))}
+                placeholder="Public Status"
+              />
+            </label>
+          </div>
+        </article>
 
-        <label>
-          Host
-          <input
-            type="text"
-            value={form.host}
-            onChange={(event) => setForm((previous) => ({ ...previous, host: event.target.value }))}
-            placeholder="example: icecast.example.org"
-          />
-        </label>
+        <article className="settings-card stream-settings-card">
+          <h3>Stream Settings</h3>
+          <p className="subhead">Connection details for metadata updates and listener stats.</p>
 
-        <label>
-          Port
-          <input
-            type="number"
-            min="1"
-            max="65535"
-            value={form.port}
-            onChange={(event) => setForm((previous) => ({ ...previous, port: event.target.value }))}
-          />
-        </label>
+          <div className="settings-grid stream-settings-grid">
+            <label className="checkbox-row settings-span-2">
+              <input
+                type="checkbox"
+                checked={Boolean(form.enabled)}
+                onChange={(event) => setForm((previous) => ({ ...previous, enabled: event.target.checked }))}
+              />
+              Enable stream integration
+            </label>
 
-        <label>
-          Mount
-          <input
-            type="text"
-            value={form.mount}
-            onChange={(event) => setForm((previous) => ({ ...previous, mount: event.target.value }))}
-            placeholder="stream"
-          />
-        </label>
+            <label>
+              Scheme
+              <select value={form.scheme} onChange={(event) => setForm((previous) => ({ ...previous, scheme: event.target.value }))}>
+                <option value="http">http</option>
+                <option value="https">https</option>
+              </select>
+            </label>
 
-        <label>
-          Username
-          <input
-            type="text"
-            value={form.username}
-            onChange={(event) => setForm((previous) => ({ ...previous, username: event.target.value }))}
-            placeholder="source"
-          />
-        </label>
+            <label>
+              Stream Host
+              <input
+                type="text"
+                value={form.host}
+                onChange={(event) => setForm((previous) => ({ ...previous, host: event.target.value }))}
+                placeholder="example: icecast.example.org"
+              />
+            </label>
 
-        <label>
-          Password {form.password_set ? "(leave blank to keep current)" : ""}
-          <input
-            type="password"
-            value={form.password}
-            onChange={(event) => setForm((previous) => ({ ...previous, password: event.target.value }))}
-          />
-        </label>
+            <label>
+              Stream Port
+              <input
+                type="number"
+                min="1"
+                max="65535"
+                value={form.port}
+                onChange={(event) => setForm((previous) => ({ ...previous, port: event.target.value }))}
+              />
+            </label>
+
+            <label>
+              Stream Mount
+              <input
+                type="text"
+                value={form.mount}
+                onChange={(event) => setForm((previous) => ({ ...previous, mount: event.target.value }))}
+                placeholder="stream"
+              />
+            </label>
+
+            <label>
+              Source Username
+              <input
+                type="text"
+                value={form.username}
+                onChange={(event) => setForm((previous) => ({ ...previous, username: event.target.value }))}
+                placeholder="source"
+              />
+            </label>
+
+            <label>
+              Source Password {form.password_set ? "(leave blank to keep current)" : ""}
+              <input
+                type="password"
+                value={form.password}
+                onChange={(event) => setForm((previous) => ({ ...previous, password: event.target.value }))}
+              />
+            </label>
+          </div>
+        </article>
       </div>
 
       <div className="settings-actions">
         <button className="primary" type="button" onClick={handleSave} disabled={saving || loading}>
           {saving ? "Saving..." : "Save Settings"}
         </button>
-        <button className="ghost" type="button" onClick={handleTest} disabled={testing || loading}>
-          {testing ? "Testing..." : "Test Using Now Playing"}
-        </button>
-        <button className="ghost" type="button" onClick={loadSettings} disabled={loading || saving || testing}>
+        <button className="ghost" type="button" onClick={loadSettings} disabled={loading || saving}>
           Reload
         </button>
       </div>
@@ -1511,7 +1949,50 @@ function ShowsTab({ shows, onOpenShow }) {
   );
 }
 
-export function App() {
+function PublicStatusPage() {
+  const [publicStatusTitle, setPublicStatusTitle] = useState("Public Status");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPublicSettings() {
+      try {
+        const payload =
+          typeof apiAdapter.getPublicSiteSettings === "function"
+            ? await apiAdapter.getPublicSiteSettings()
+            : await fetch("/v1/status/site-settings").then((response) => response.json());
+        if (cancelled) return;
+        const item = payload?.item || {};
+        setPublicStatusTitle(item.public_status_title || "Public Status");
+      } catch (_error) {
+        if (cancelled) return;
+      }
+    }
+    loadPublicSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = publicStatusTitle;
+  }, [publicStatusTitle]);
+
+  return (
+    <div className="page-shell public-status-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Radiant</p>
+          <h1>{publicStatusTitle}</h1>
+          <p className="subhead">Live listener counts, stream uptime, and listener geo visibility.</p>
+        </div>
+      </header>
+      <StatsTab mode="public" />
+    </div>
+  );
+}
+
+function AdminApp() {
   const [slots, setSlots] = useState([]);
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1528,6 +2009,7 @@ export function App() {
     return "week";
   });
   const [activeTab, setActiveTab] = useState("schedule");
+  const [adminTitle, setAdminTitle] = useState("KAAD-lp Admin");
   const [slotMenuId, setSlotMenuId] = useState(null);
   const [tooltipSlotId, setTooltipSlotId] = useState(null);
   const [touchSafeMode, setTouchSafeMode] = useState(() => {
@@ -1543,6 +2025,12 @@ export function App() {
   const [pendingUpdates, setPendingUpdates] = useState({});
   const [pendingDeletes, setPendingDeletes] = useState([]);
   const [committing, setCommitting] = useState(false);
+
+  function handleSiteTitlesChange(next = {}) {
+    if (next?.adminTitle) {
+      setAdminTitle(next.adminTitle);
+    }
+  }
 
   async function loadData() {
     setLoading(true);
@@ -1582,6 +2070,29 @@ export function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAdminShellSettings() {
+      try {
+        const payload = await apiAdapter.getAdminIcecastSettings();
+        if (cancelled) return;
+        const item = payload?.item || {};
+        setAdminTitle(item.admin_title || "KAAD-lp Admin");
+      } catch (_error) {
+        if (cancelled) return;
+      }
+    }
+    loadAdminShellSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = adminTitle;
+  }, [adminTitle]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1909,7 +2420,7 @@ export function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Radiant</p>
-          <h1>KAAD-lp Admin</h1>
+          <h1>{adminTitle}</h1>
           <p className="subhead">
             {activeTab === "schedule"
               ? "Sun-Sat visual planner with drag, resize, and quick slot creation."
@@ -1917,7 +2428,9 @@ export function App() {
                 ? "Filter and edit show records, metadata, and DJ relationships."
                 : activeTab === "reports"
                   ? "Generate and download reporting exports for station operations."
-                  : "Configure Icecast metadata update settings and test now-playing pushes."}
+                  : activeTab === "stats"
+                    ? "Live listener counts, uptime, and geo visibility from Icecast data."
+                  : "Configure branding and stream integration for metadata updates and listener stats."}
           </p>
         </div>
         <div className="topbar-actions">
@@ -1947,12 +2460,25 @@ export function App() {
               Reporting
             </button>
             <button
+              className={activeTab === "stats" ? "ghost active" : "ghost"}
+              type="button"
+              aria-pressed={activeTab === "stats"}
+              onClick={() => setActiveTab("stats")}
+            >
+              Stats
+            </button>
+            <button
               className={activeTab === "settings" ? "ghost active" : "ghost"}
               type="button"
+              aria-label="Settings"
               aria-pressed={activeTab === "settings"}
               onClick={() => setActiveTab("settings")}
             >
-              Settings
+              <span className="tab-gear-icon" aria-hidden="true">
+                <svg viewBox="0 0 512 512" role="presentation" focusable="false">
+                  <path d="M195.1 9.5C198.1-5.3 211.2-16 226.4-16l59.8 0c15.2 0 28.3 10.7 31.3 25.5L332 79.5c14.1 6 27.3 13.7 39.3 22.8l67.8-22.5c14.4-4.8 30.2 1.2 37.8 14.4l29.9 51.8c7.6 13.2 4.9 29.8-6.5 39.9L447 233.3c.9 7.4 1.3 15 1.3 22.7s-.5 15.3-1.3 22.7l53.4 47.5c11.4 10.1 14 26.8 6.5 39.9l-29.9 51.8c-7.6 13.1-23.4 19.2-37.8 14.4l-67.8-22.5c-12.1 9.1-25.3 16.7-39.3 22.8l-14.4 69.9c-3.1 14.9-16.2 25.5-31.3 25.5l-59.8 0c-15.2 0-28.3-10.7-31.3-25.5l-14.4-69.9c-14.1-6-27.2-13.7-39.3-22.8L73.5 432.3c-14.4 4.8-30.2-1.2-37.8-14.4L5.8 366.1c-7.6-13.2-4.9-29.8 6.5-39.9l53.4-47.5c-.9-7.4-1.3-15-1.3-22.7s.5-15.3 1.3-22.7L12.3 185.8c-11.4-10.1-14-26.8-6.5-39.9L35.7 94.1c7.6-13.2 23.4-19.2 37.8-14.4l67.8 22.5c12.1-9.1 25.3-16.7 39.3-22.8L195.1 9.5zM256.3 336a80 80 0 1 0 -.6-160 80 80 0 1 0 .6 160z" />
+                </svg>
+              </span>
             </button>
           </div>
 
@@ -2209,8 +2735,10 @@ export function App() {
         <ShowsTab shows={shows} onOpenShow={setShowDetailsShowId} />
       ) : activeTab === "reports" ? (
         <ReportingTab />
+      ) : activeTab === "stats" ? (
+        <StatsTab />
       ) : (
-        <SettingsTab />
+        <SettingsTab onSiteTitlesChange={handleSiteTitlesChange} />
       )}
 
       <AddSlotDialog
@@ -2237,4 +2765,12 @@ export function App() {
       />
     </div>
   );
+}
+
+export function App() {
+  const isPublicStatusRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/status");
+  if (isPublicStatusRoute) {
+    return <PublicStatusPage />;
+  }
+  return <AdminApp />;
 }
