@@ -126,6 +126,21 @@ export const apiAdapter = {
       body: JSON.stringify(payload),
     });
   },
+  getAdminIcecastSettings() {
+    return request("/v1/admin/settings/icecast", { method: "GET" });
+  },
+  updateAdminIcecastSettings(payload) {
+    return request("/v1/admin/settings/icecast", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  testAdminIcecastSettings() {
+    return request("/v1/admin/settings/icecast/test", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
   createScheduleSlot(payload) {
     return request("/v1/admin/schedule/slots", {
       method: "POST",

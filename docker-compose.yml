@@ -104,6 +104,16 @@ services:
       ACRCLOUD_CALLBACK_TOKEN: ${ACRCLOUD_CALLBACK_TOKEN:-}
       ACRCLOUD_DEDUPE_SECONDS: ${ACRCLOUD_DEDUPE_SECONDS:-120}
       ACRCLOUD_EXPECTED_PROJECT_ID: ${ACRCLOUD_EXPECTED_PROJECT_ID:-}
+      ICECAST_META_CONFIG_PATH: ${ICECAST_META_CONFIG_PATH:-/app/data/icecast-meta-config.json}
+      ICECAST_META_ENABLED: ${ICECAST_META_ENABLED:-false}
+      ICECAST_META_SCHEME: ${ICECAST_META_SCHEME:-http}
+      ICECAST_META_HOST: ${ICECAST_META_HOST:-}
+      ICECAST_META_PORT: ${ICECAST_META_PORT:-8000}
+      ICECAST_META_MOUNT: ${ICECAST_META_MOUNT:-stream}
+      ICECAST_META_USERNAME: ${ICECAST_META_USERNAME:-source}
+      ICECAST_META_PASSWORD: ${ICECAST_META_PASSWORD:-}
+    volumes:
+      - radiant_api_data:/app/data
     ports:
       - "0.0.0.0:3000:3000"
 
@@ -111,3 +121,4 @@ volumes:
   postgres_data:
   directus_uploads:
   directus_extensions:
+  radiant_api_data:

@@ -1,5 +1,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
+const pathModule = require("node:path");
 const { URL } = require("node:url");
 
 const port = Number(process.env.PORT || 3000);
@@ -25,8 +27,30 @@ const acrCallbackToken = process.env.ACRCLOUD_CALLBACK_TOKEN || "";
 const acrDedupeSeconds = Number(process.env.ACRCLOUD_DEDUPE_SECONDS || 120);
 const acrExpectedProjectId = String(process.env.ACRCLOUD_EXPECTED_PROJECT_ID || "").trim();
 const radiantAdminToken = process.env.RADIANT_ADMIN_TOKEN || "";
+const icecastConfigPath = process.env.ICECAST_META_CONFIG_PATH || "/app/data/icecast-meta-config.json";
+
+function parseBooleanEnv(value, fallback = false) {
+  const text = String(value == null ? "" : value)
+    .trim()
+    .toLowerCase();
+  if (!text) return fallback;
+  if (["1", "true", "yes", "on"].includes(text)) return true;
+  if (["0", "false", "no", "off"].includes(text)) return false;
+  return fallback;
+}
+
+const icecastDefaults = {
+  enabled: parseBooleanEnv(process.env.ICECAST_META_ENABLED, false),
+  scheme: String(process.env.ICECAST_META_SCHEME || "http").trim().toLowerCase() === "https" ? "https" : "http",
+  host: String(process.env.ICECAST_META_HOST || "").trim(),
+  port: Number(process.env.ICECAST_META_PORT || 8000) || 8000,
+  mount: String(process.env.ICECAST_META_MOUNT || "stream").trim(),
+  username: String(process.env.ICECAST_META_USERNAME || "source").trim() || "source",
+  password: String(process.env.ICECAST_META_PASSWORD || ""),
+};
 
 let directusToken = null;
+let icecastConfigCache = null;
 
 const weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -228,6 +252,170 @@ function toIsoUtc(timestampUtc) {
   const dt = new Date(candidate);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toISOString();
+}
+
+function normalizeDisplayText(value) {
+  if (value == null) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  const lowered = text.toLowerCase();
+  if (lowered === "0" || lowered === "null") return "";
+  return text;
+}
+
+function normalizeIcecastMount(value) {
+  const trimmed = String(value || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\?.*$/, "");
+  return trimmed || "stream";
+}
+
+function normalizeIcecastConfig(input = {}, existing = icecastDefaults) {
+  const merged = {
+    enabled: input.enabled == null ? existing.enabled : Boolean(input.enabled),
+    scheme: input.scheme == null ? existing.scheme : String(input.scheme).trim().toLowerCase(),
+    host: input.host == null ? existing.host : String(input.host).trim(),
+    port: input.port == null || input.port === "" ? existing.port : Number(input.port),
+    mount: input.mount == null ? existing.mount : String(input.mount),
+    username: input.username == null ? existing.username : String(input.username).trim(),
+    password: input.password == null ? existing.password : String(input.password),
+  };
+
+  return {
+    enabled: Boolean(merged.enabled),
+    scheme: merged.scheme === "https" ? "https" : "http",
+    host: merged.host,
+    port: Number.isInteger(Number(merged.port)) ? clampNumber(Number(merged.port), 1, 65535) : 8000,
+    mount: normalizeIcecastMount(merged.mount),
+    username: merged.username || "source",
+    password: merged.password,
+  };
+}
+
+function sanitizeIcecastConfigForClient(config) {
+  return {
+    enabled: Boolean(config.enabled),
+    scheme: config.scheme,
+    host: config.host,
+    port: Number(config.port),
+    mount: normalizeIcecastMount(config.mount),
+    username: config.username,
+    password: "",
+    password_set: Boolean(String(config.password || "").trim()),
+  };
+}
+
+async function loadIcecastConfig() {
+  if (icecastConfigCache) return icecastConfigCache;
+  try {
+    const text = await fs.readFile(icecastConfigPath, "utf-8");
+    const parsed = JSON.parse(text);
+    icecastConfigCache = normalizeIcecastConfig(parsed, icecastDefaults);
+    return icecastConfigCache;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read Icecast config: ${error.message || String(error)}`);
+    }
+    icecastConfigCache = normalizeIcecastConfig(icecastDefaults, icecastDefaults);
+    return icecastConfigCache;
+  }
+}
+
+async function writeIcecastConfig(nextConfig) {
+  const normalized = normalizeIcecastConfig(nextConfig, icecastDefaults);
+  const dir = pathModule.dirname(icecastConfigPath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(icecastConfigPath, `${JSON.stringify(normalized, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+  icecastConfigCache = normalized;
+  return normalized;
+}
+
+function buildIcecastSongText({ artist = "", title = "", showTitle = "" }) {
+  let nextArtist = normalizeDisplayText(artist);
+  let nextTitle = normalizeDisplayText(title);
+  if (!nextArtist && nextTitle.includes(" - ")) {
+    const parts = nextTitle.split(" - ", 2).map((item) => item.trim());
+    if (parts[0] && parts[1]) {
+      nextArtist = parts[0];
+      nextTitle = parts[1];
+    }
+  }
+  if (nextArtist && nextTitle) return `${nextArtist} - ${nextTitle}`;
+  if (nextTitle) return nextTitle;
+  return normalizeDisplayText(showTitle);
+}
+
+function buildIcecastSongTextFromNowPlaying(snapshot) {
+  return buildIcecastSongText({
+    artist: snapshot?.track?.artist,
+    title: snapshot?.track?.title,
+    showTitle: snapshot?.show?.title,
+  });
+}
+
+async function pushIcecastMetadata(songText, options = {}) {
+  const allowDisabled = Boolean(options.allowDisabled);
+  const config = normalizeIcecastConfig(options.config || (await loadIcecastConfig()), icecastDefaults);
+  const cleanSong = normalizeDisplayText(songText);
+
+  if (!cleanSong) {
+    return { attempted: false, updated: false, reason: "empty_song" };
+  }
+  if (!allowDisabled && !config.enabled) {
+    return { attempted: false, updated: false, reason: "disabled" };
+  }
+  if (!config.host) {
+    return { attempted: false, updated: false, reason: "missing_host" };
+  }
+  if (!config.password) {
+    return { attempted: false, updated: false, reason: "missing_password" };
+  }
+
+  const mount = `/${normalizeIcecastMount(config.mount)}`;
+  const endpoint = new URL(`${config.scheme}://${config.host}:${config.port}/admin/metadata`);
+  endpoint.searchParams.set("mode", "updinfo");
+  endpoint.searchParams.set("mount", mount);
+  endpoint.searchParams.set("song", cleanSong);
+
+  const credentials = Buffer.from(`${config.username}:${config.password}`).toString("base64");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        "User-Agent": "radiant-api/icecast-meta",
+      },
+    });
+  } catch (error) {
+    return {
+      attempted: true,
+      updated: false,
+      reason: "request_failed",
+      detail: error?.message || String(error),
+    };
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    return {
+      attempted: true,
+      updated: false,
+      reason: "upstream_error",
+      status: response.status,
+      detail: String(body || "").trim().slice(0, 240) || `HTTP ${response.status}`,
+    };
+  }
+
+  return {
+    attempted: true,
+    updated: true,
+    reason: "ok",
+    status: response.status,
+    song: cleanSong,
+    mount,
+  };
 }
 
 function timingSafeEqualText(a, b) {
@@ -513,6 +701,76 @@ function isTrackFreshAndConfident(track, now) {
   return ageSec >= 0 && ageSec <= nowPlayingFreshSeconds;
 }
 
+async function resolveNowPlayingPayload(timezone, now = new Date()) {
+  const [track, live] = await Promise.all([getRecentTrack(), resolveLiveSchedule(now.toISOString(), timezone)]);
+
+  if (track && isTrackFreshAndConfident(track, now)) {
+    const showMap = await getShowsByIds(track.show ? [track.show] : []);
+    return {
+      source: "track",
+      resolved_at: now.toISOString(),
+      fresh_until: new Date(new Date(track.played_at).getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
+      timezone,
+      track: {
+        id: track.id,
+        played_at: track.played_at,
+        artist: track.artist || null,
+        title: track.title || null,
+        album: track.album || null,
+        artwork_url: track.artwork_url || null,
+        confidence: track.confidence == null ? null : Number(track.confidence),
+        provider: track.provider || null,
+        provider_ref: track.provider_ref || null,
+      },
+      show: safeShowSummary(showMap[track.show] || live.show || null),
+      context: {
+        override_active: live.override_active,
+        slot: live.slot,
+      },
+    };
+  }
+
+  const liveShowTrack = await getRecentTrackForLiveShowWindow(live, now);
+  if (liveShowTrack) {
+    const showMap = await getShowsByIds(liveShowTrack.show ? [liveShowTrack.show] : []);
+    return {
+      source: "track_live_window",
+      resolved_at: now.toISOString(),
+      fresh_until: new Date(now.getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
+      timezone,
+      track: {
+        id: liveShowTrack.id,
+        played_at: liveShowTrack.played_at,
+        artist: liveShowTrack.artist || null,
+        title: liveShowTrack.title || null,
+        album: liveShowTrack.album || null,
+        artwork_url: liveShowTrack.artwork_url || null,
+        confidence: liveShowTrack.confidence == null ? null : Number(liveShowTrack.confidence),
+        provider: liveShowTrack.provider || null,
+        provider_ref: liveShowTrack.provider_ref || null,
+      },
+      show: safeShowSummary(showMap[liveShowTrack.show] || live.show || null),
+      context: {
+        override_active: live.override_active,
+        slot: live.slot,
+      },
+    };
+  }
+
+  return {
+    source: "schedule_fallback",
+    resolved_at: now.toISOString(),
+    fresh_until: new Date(now.getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
+    timezone,
+    track: null,
+    show: live.show,
+    context: {
+      override_active: live.override_active,
+      slot: live.slot,
+    },
+  };
+}
+
 async function buildScheduleWeek(weekStartInput, timezone) {
   const now = new Date();
   const weekStart = resolveWeekStart(weekStartInput, timezone, now);
@@ -754,6 +1012,9 @@ async function ingestAcrcloudPayload(payload) {
     inserted: true,
     reason: useConsensus ? "inserted_consensus_override" : "inserted",
     id: created?.id || null,
+    artist,
+    title,
+    show_title: live?.show?.title || null,
     corrected: useConsensus,
     corrected_from: useConsensus ? { artist: rawArtist, title: rawTitle } : null,
     corrected_to: useConsensus ? { artist, title } : null,
@@ -1553,6 +1814,8 @@ const server = http.createServer((req, res) => {
           `/${apiVersion}/admin/shows/:id/djs (internal)`,
           `/${apiVersion}/admin/shows/:id/djs/:djId (internal)`,
           `/${apiVersion}/admin/schedule/slots (internal)`,
+          `/${apiVersion}/admin/settings/icecast (internal)`,
+          `/${apiVersion}/admin/settings/icecast/test (internal)`,
           `/${apiVersion}/acrcloud/callback (internal)`,
         ],
       },
@@ -1616,6 +1879,77 @@ const server = http.createServer((req, res) => {
           filename,
           mime_type: report?.mimeType || "text/plain; charset=utf-8",
           content: report?.content || "",
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/settings/icecast` && req.method === "GET") {
+      const config = await loadIcecastConfig();
+      return sendJson(
+        res,
+        200,
+        {
+          item: sanitizeIcecastConfigForClient(config),
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/settings/icecast` && req.method === "PATCH") {
+      const current = await loadIcecastConfig();
+      const body = await readJsonBody(req);
+      const keepPassword = body?.password == null || String(body.password) === "";
+      const next = normalizeIcecastConfig(
+        {
+          enabled: body?.enabled,
+          scheme: body?.scheme,
+          host: body?.host,
+          port: body?.port,
+          mount: body?.mount,
+          username: body?.username,
+          password: keepPassword ? current.password : String(body.password || ""),
+        },
+        current,
+      );
+      const saved = await writeIcecastConfig(next);
+      return sendJson(
+        res,
+        200,
+        {
+          item: sanitizeIcecastConfigForClient(saved),
+        },
+        corsHeaders,
+      );
+    }
+
+    if (path === `/${apiVersion}/admin/settings/icecast/test` && req.method === "POST") {
+      const config = await loadIcecastConfig();
+      const snapshot = await resolveNowPlayingPayload(defaultTimezone, new Date());
+      const songText = buildIcecastSongTextFromNowPlaying(snapshot);
+      if (!songText) {
+        return sendJson(
+          res,
+          409,
+          {
+            tested: false,
+            error: "nothing_to_send",
+            now_playing_source: snapshot.source,
+            message: "No track or show title is available to send to Icecast.",
+          },
+          corsHeaders,
+        );
+      }
+
+      const pushResult = await pushIcecastMetadata(songText, { config, allowDisabled: true });
+      return sendJson(
+        res,
+        pushResult.updated ? 200 : 502,
+        {
+          tested: pushResult.updated,
+          now_playing_source: snapshot.source,
+          song: songText,
+          push: pushResult,
         },
         corsHeaders,
       );
@@ -1798,7 +2132,16 @@ const server = http.createServer((req, res) => {
     }
     const body = await readJsonBody(req);
     const result = await ingestAcrcloudPayload(body);
-    return sendJson(res, 200, { status: "accepted", ...result }, corsHeaders);
+    let icecast = { attempted: false, updated: false, reason: "not_inserted" };
+    if (result.inserted) {
+      const songText = buildIcecastSongText({
+        artist: result.artist,
+        title: result.title,
+        showTitle: result.show_title,
+      });
+      icecast = await pushIcecastMetadata(songText);
+    }
+    return sendJson(res, 200, { status: "accepted", ...result, icecast }, corsHeaders);
   }
 
   if (path === `/${apiVersion}/schedule` && req.method === "GET") {
@@ -1826,89 +2169,8 @@ const server = http.createServer((req, res) => {
 
   if (path === `/${apiVersion}/now-playing` && req.method === "GET") {
     const timezone = requestUrl.searchParams.get("tz") || defaultTimezone;
-    const now = new Date();
-    const [track, live] = await Promise.all([getRecentTrack(), resolveLiveSchedule(now.toISOString(), timezone)]);
-
-    if (track && isTrackFreshAndConfident(track, now)) {
-      const showMap = await getShowsByIds(track.show ? [track.show] : []);
-      return sendJson(
-        res,
-        200,
-        {
-          source: "track",
-          resolved_at: now.toISOString(),
-          fresh_until: new Date(new Date(track.played_at).getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
-          timezone,
-          track: {
-            id: track.id,
-            played_at: track.played_at,
-            artist: track.artist || null,
-            title: track.title || null,
-            album: track.album || null,
-            artwork_url: track.artwork_url || null,
-            confidence: track.confidence == null ? null : Number(track.confidence),
-            provider: track.provider || null,
-            provider_ref: track.provider_ref || null,
-          },
-          show: safeShowSummary(showMap[track.show] || live.show || null),
-          context: {
-            override_active: live.override_active,
-            slot: live.slot,
-          },
-        },
-        corsHeaders,
-      );
-    }
-
-    const liveShowTrack = await getRecentTrackForLiveShowWindow(live, now);
-    if (liveShowTrack) {
-      const showMap = await getShowsByIds(liveShowTrack.show ? [liveShowTrack.show] : []);
-      return sendJson(
-        res,
-        200,
-        {
-          source: "track_live_window",
-          resolved_at: now.toISOString(),
-          fresh_until: new Date(now.getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
-          timezone,
-          track: {
-            id: liveShowTrack.id,
-            played_at: liveShowTrack.played_at,
-            artist: liveShowTrack.artist || null,
-            title: liveShowTrack.title || null,
-            album: liveShowTrack.album || null,
-            artwork_url: liveShowTrack.artwork_url || null,
-            confidence: liveShowTrack.confidence == null ? null : Number(liveShowTrack.confidence),
-            provider: liveShowTrack.provider || null,
-            provider_ref: liveShowTrack.provider_ref || null,
-          },
-          show: safeShowSummary(showMap[liveShowTrack.show] || live.show || null),
-          context: {
-            override_active: live.override_active,
-            slot: live.slot,
-          },
-        },
-        corsHeaders,
-      );
-    }
-
-    return sendJson(
-      res,
-      200,
-      {
-        source: "schedule_fallback",
-        resolved_at: now.toISOString(),
-        fresh_until: new Date(now.getTime() + nowPlayingFreshSeconds * 1000).toISOString(),
-        timezone,
-        track: null,
-        show: live.show,
-        context: {
-          override_active: live.override_active,
-          slot: live.slot,
-        },
-      },
-      corsHeaders,
-    );
+    const payload = await resolveNowPlayingPayload(timezone, new Date());
+    return sendJson(res, 200, payload, corsHeaders);
   }
 
   if (path.startsWith(`/${apiVersion}/shows/`) && path.endsWith("/insights") && req.method === "GET") {

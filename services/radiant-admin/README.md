@@ -7,6 +7,7 @@ Standalone web app for station operations (schedule editing + reporting exports)
 - Visual weekly/day scheduler for recurring slots
 - Staged editing workflow before commit
 - Reporting tab for generating API-backed exports
+- Settings tab for Icecast metadata configuration + test push
 - Mobile-usable controls for day-by-day schedule management
 
 ## Runtime
@@ -32,6 +33,7 @@ Injected via compose:
 - Slot action menu (`...`) for edit/show detail/delete
 - Reporting tab with report type loading fallback
 - In-development report types disabled in UI
+- Icecast settings form with save + test actions
 
 ## Reporting behavior
 

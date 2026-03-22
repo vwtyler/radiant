@@ -1149,6 +1149,197 @@ function ReportingTab() {
   );
 }
 
+function SettingsTab() {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [testInfo, setTestInfo] = useState("");
+  const [form, setForm] = useState({
+    enabled: false,
+    scheme: "http",
+    host: "",
+    port: 8000,
+    mount: "stream",
+    username: "source",
+    password: "",
+    password_set: false,
+  });
+
+  async function loadSettings() {
+    setLoading(true);
+    setError("");
+    setInfo("");
+    try {
+      const payload = await apiAdapter.getAdminIcecastSettings();
+      const item = payload?.item || {};
+      setForm((previous) => ({
+        ...previous,
+        enabled: Boolean(item.enabled),
+        scheme: item.scheme === "https" ? "https" : "http",
+        host: item.host || "",
+        port: Number(item.port || 8000),
+        mount: item.mount || "stream",
+        username: item.username || "source",
+        password: "",
+        password_set: Boolean(item.password_set),
+      }));
+    } catch (loadError) {
+      setError(loadError.message || "Failed to load Icecast settings.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+    setInfo("");
+    setTestInfo("");
+    try {
+      const payload = await apiAdapter.updateAdminIcecastSettings({
+        enabled: form.enabled,
+        scheme: form.scheme,
+        host: form.host,
+        port: Number(form.port),
+        mount: form.mount,
+        username: form.username,
+        password: form.password,
+      });
+      const item = payload?.item || {};
+      setForm((previous) => ({
+        ...previous,
+        enabled: Boolean(item.enabled),
+        scheme: item.scheme === "https" ? "https" : "http",
+        host: item.host || "",
+        port: Number(item.port || 8000),
+        mount: item.mount || "stream",
+        username: item.username || "source",
+        password: "",
+        password_set: Boolean(item.password_set),
+      }));
+      setInfo("Icecast settings saved.");
+    } catch (saveError) {
+      setError(saveError.message || "Failed to save Icecast settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setError("");
+    setTestInfo("");
+    try {
+      const payload = await apiAdapter.testAdminIcecastSettings();
+      const song = payload?.song ? ` (${payload.song})` : "";
+      setTestInfo(`Icecast update test succeeded${song}.`);
+    } catch (testError) {
+      setError(testError.message || "Icecast test failed.");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <section className="settings-shell">
+      <h2>Settings</h2>
+      <p className="subhead">Configure Icecast metadata updates from Radiant API now-playing data.</p>
+
+      {loading ? <p>Loading settings...</p> : null}
+      {error ? <p className="status-bad">{error}</p> : null}
+      {info ? <p className="status-good">{info}</p> : null}
+      {testInfo ? <p className="status-good">{testInfo}</p> : null}
+
+      <div className="settings-grid">
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={Boolean(form.enabled)}
+            onChange={(event) => setForm((previous) => ({ ...previous, enabled: event.target.checked }))}
+          />
+          Enable Icecast metadata updates
+        </label>
+
+        <label>
+          Scheme
+          <select value={form.scheme} onChange={(event) => setForm((previous) => ({ ...previous, scheme: event.target.value }))}>
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </label>
+
+        <label>
+          Host
+          <input
+            type="text"
+            value={form.host}
+            onChange={(event) => setForm((previous) => ({ ...previous, host: event.target.value }))}
+            placeholder="example: icecast.example.org"
+          />
+        </label>
+
+        <label>
+          Port
+          <input
+            type="number"
+            min="1"
+            max="65535"
+            value={form.port}
+            onChange={(event) => setForm((previous) => ({ ...previous, port: event.target.value }))}
+          />
+        </label>
+
+        <label>
+          Mount
+          <input
+            type="text"
+            value={form.mount}
+            onChange={(event) => setForm((previous) => ({ ...previous, mount: event.target.value }))}
+            placeholder="stream"
+          />
+        </label>
+
+        <label>
+          Username
+          <input
+            type="text"
+            value={form.username}
+            onChange={(event) => setForm((previous) => ({ ...previous, username: event.target.value }))}
+            placeholder="source"
+          />
+        </label>
+
+        <label>
+          Password {form.password_set ? "(leave blank to keep current)" : ""}
+          <input
+            type="password"
+            value={form.password}
+            onChange={(event) => setForm((previous) => ({ ...previous, password: event.target.value }))}
+          />
+        </label>
+      </div>
+
+      <div className="settings-actions">
+        <button className="primary" type="button" onClick={handleSave} disabled={saving || loading}>
+          {saving ? "Saving..." : "Save Settings"}
+        </button>
+        <button className="ghost" type="button" onClick={handleTest} disabled={testing || loading}>
+          {testing ? "Testing..." : "Test Using Now Playing"}
+        </button>
+        <button className="ghost" type="button" onClick={loadSettings} disabled={loading || saving || testing}>
+          Reload
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ShowsTab({ shows, onOpenShow }) {
   const [searchText, setSearchText] = useState("");
   const [showTypeFilter, setShowTypeFilter] = useState("all");
@@ -1724,7 +1915,9 @@ export function App() {
               ? "Sun-Sat visual planner with drag, resize, and quick slot creation."
               : activeTab === "shows"
                 ? "Filter and edit show records, metadata, and DJ relationships."
-                : "Generate and download reporting exports for station operations."}
+                : activeTab === "reports"
+                  ? "Generate and download reporting exports for station operations."
+                  : "Configure Icecast metadata update settings and test now-playing pushes."}
           </p>
         </div>
         <div className="topbar-actions">
@@ -1752,6 +1945,14 @@ export function App() {
               onClick={() => setActiveTab("reports")}
             >
               Reporting
+            </button>
+            <button
+              className={activeTab === "settings" ? "ghost active" : "ghost"}
+              type="button"
+              aria-pressed={activeTab === "settings"}
+              onClick={() => setActiveTab("settings")}
+            >
+              Settings
             </button>
           </div>
 
@@ -2006,8 +2207,10 @@ export function App() {
         </>
       ) : activeTab === "shows" ? (
         <ShowsTab shows={shows} onOpenShow={setShowDetailsShowId} />
-      ) : (
+      ) : activeTab === "reports" ? (
         <ReportingTab />
+      ) : (
+        <SettingsTab />
       )}
 
       <AddSlotDialog

@@ -32,6 +32,12 @@ Ingestion:
 
 - `POST /v1/acrcloud/callback` (secured)
 
+Icecast metadata integration:
+
+- On successful ACRCloud ingest, pushes metadata to Icecast when enabled
+- Song text format: `Artist - Title`
+- Fallback when no track text is available: current show title
+
 ## Admin endpoints (`/v1/admin/*`)
 
 Protected by header:
@@ -44,6 +50,13 @@ Primary groups:
 - DJs CRUD helpers
 - schedule slots CRUD
 - report types + report generation
+- Icecast metadata settings + test endpoint
+
+Icecast admin endpoints:
+
+- `GET /v1/admin/settings/icecast`
+- `PATCH /v1/admin/settings/icecast`
+- `POST /v1/admin/settings/icecast/test`
 
 ## Report generation status
 
@@ -62,6 +75,8 @@ Other report types return `report_in_development`.
 - `RADIANT_ADMIN_TOKEN`
 
 Also uses edge/ingestion controls from root `.env.example` (CORS, rate limits, ACRCloud secrets, etc.).
+
+Optional Icecast defaults can be provided via env vars (`ICECAST_META_*`), but runtime settings are persisted to JSON at `ICECAST_META_CONFIG_PATH` (default `/app/data/icecast-meta-config.json`). In compose, `/app/data` is backed by a named volume so credentials are not committed to git.
 
 ## Local verify
 
