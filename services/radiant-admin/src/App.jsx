@@ -14,6 +14,112 @@ const DAYS = [
   { num: 6, label: "Sat" },
 ];
 
+const RECURRENCE_OPTIONS = [
+  { value: "every_week", label: "Every Week" },
+  { value: "first_third", label: "1st and 3rd" },
+  { value: "second_fourth", label: "2nd and 4th" },
+  { value: "fifth", label: "5th only" },
+];
+
+function normalizeScheduleRule(value) {
+  const text = String(value == null ? "" : value)
+    .trim()
+    .toLowerCase();
+  if (!text || text === "every_week" || text === "weekly") return "every_week";
+  if (text === "first_third" || text === "first_and_third" || text === "1st_3rd") return "first_third";
+  if (text === "second_fourth" || text === "second_and_fourth" || text === "2nd_4th") return "second_fourth";
+  if (text === "fifth" || text === "5th") return "fifth";
+  return "every_week";
+}
+
+function recurrenceLabel(rule) {
+  const normalized = normalizeScheduleRule(rule);
+  return RECURRENCE_OPTIONS.find((item) => item.value === normalized)?.label || "Every Week";
+}
+
+function recurrenceRulesOverlap(aRule, bRule) {
+  const a = normalizeScheduleRule(aRule);
+  const b = normalizeScheduleRule(bRule);
+  if (a === "every_week" || b === "every_week") return true;
+  if (a === b) return true;
+  return false;
+}
+
+function getWeekdayOccurrenceFromDateLocal(dateLocal) {
+  const match = String(dateLocal || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const day = Number(match[3]);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+  return Math.floor((day - 1) / 7) + 1;
+}
+
+function recurrenceAppliesToDate(rule, dateLocal) {
+  const normalized = normalizeScheduleRule(rule);
+  const occurrence = getWeekdayOccurrenceFromDateLocal(dateLocal);
+  if (!occurrence) return true;
+  if (normalized === "first_third") return occurrence === 1 || occurrence === 3;
+  if (normalized === "second_fourth") return occurrence === 2 || occurrence === 4;
+  if (normalized === "fifth") return occurrence === 5;
+  return true;
+}
+
+function parseAlternatingGroup(slotKey) {
+  const raw = String(slotKey || "");
+  if (!raw.startsWith("altgrp:")) return "";
+  const rest = raw.slice("altgrp:".length);
+  const [group] = rest.split("::");
+  return String(group || "").trim().toLowerCase();
+}
+
+function getEffectiveRuleForSlot(windowSlots, slot) {
+  const explicit = normalizeScheduleRule(slot?.special_rule);
+  if (explicit !== "every_week") return explicit;
+
+  const rows = Array.isArray(windowSlots) ? windowSlots : [];
+  const hasExplicit = rows.some((item) => normalizeScheduleRule(item?.special_rule) !== "every_week");
+  if (hasExplicit) return explicit;
+
+  const targetGroup = parseAlternatingGroup(slot?.slot_key);
+  if (!targetGroup) return explicit;
+
+  const grouped = rows
+    .filter((item) => parseAlternatingGroup(item?.slot_key) === targetGroup)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  if (grouped.length < 2) return explicit;
+
+  const index = grouped.findIndex((item) => item.id === slot.id);
+  if (index === 0) return "first_third";
+  if (index === 1) return "second_fourth";
+  return "fifth";
+}
+
+function resolveVisibleSlotsForDate(daySlots, dateLocal) {
+  const rows = Array.isArray(daySlots) ? daySlots : [];
+  const byWindow = new Map();
+  for (const slot of rows) {
+    const key = `${slot.start_time}|${slot.end_time}|${slot.timezone || ""}`;
+    if (!byWindow.has(key)) byWindow.set(key, []);
+    byWindow.get(key).push(slot);
+  }
+
+  const selected = [];
+  for (const windowSlots of byWindow.values()) {
+    const applicable = windowSlots
+      .map((slot) => ({ slot, rule: getEffectiveRuleForSlot(windowSlots, slot) }))
+      .filter((item) => recurrenceAppliesToDate(item.rule, dateLocal));
+    if (!applicable.length) continue;
+    applicable.sort((a, b) => {
+      const aSpecific = a.rule === "every_week" ? 0 : 1;
+      const bSpecific = b.rule === "every_week" ? 0 : 1;
+      if (aSpecific !== bSpecific) return bSpecific - aSpecific;
+      return String(a.slot.id).localeCompare(String(b.slot.id));
+    });
+    selected.push(applicable[0].slot);
+  }
+
+  return selected.sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time));
+}
+
 const PX_PER_MINUTE = 1.5;
 const GRID_MINUTES = 24 * 60;
 const COMPRESSED_BLOCK_END_MINUTES = 7 * 60;
@@ -71,6 +177,70 @@ function minuteToDisplay(minutes) {
   return `${hour12}:${minute} ${meridiem}`;
 }
 
+function zonedDateIso(date, timezone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date instanceof Date ? date : new Date(date || Date.now()));
+    const map = {};
+    for (const part of parts) {
+      if (part.type === "year" || part.type === "month" || part.type === "day") {
+        map[part.type] = part.value;
+      }
+    }
+    if (!map.year || !map.month || !map.day) return "";
+    return `${map.year}-${map.month}-${map.day}`;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function zonedWeekdayNum(date, timezone) {
+  try {
+    const short = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: timezone }).format(
+      date instanceof Date ? date : new Date(date || Date.now()),
+    );
+    const map = { Sun: 7, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[short] || 7;
+  } catch (_error) {
+    return 7;
+  }
+}
+
+function shiftDateLocal(dateLocal, days) {
+  const base = new Date(`${String(dateLocal)}T12:00:00Z`);
+  if (Number.isNaN(base.getTime())) return String(dateLocal || "");
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  return base.toISOString().slice(0, 10);
+}
+
+function getCurrentWeekStartLocal(timezone) {
+  const now = new Date();
+  const todayLocal = zonedDateIso(now, timezone) || zonedDateIso(now, "America/Los_Angeles");
+  const weekdayNum = zonedWeekdayNum(now, timezone);
+  const daysBackToSunday = weekdayNum % 7;
+  return shiftDateLocal(todayLocal, -daysBackToSunday);
+}
+
+function formatDateShort(dateLocal) {
+  const dt = new Date(`${String(dateLocal || "")}T12:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(dt);
+}
+
+function formatWeekRange(startLocal) {
+  const endLocal = shiftDateLocal(startLocal, 6);
+  const start = new Date(`${startLocal}T12:00:00Z`);
+  const end = new Date(`${endLocal}T12:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+  const startLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(start);
+  const endLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(end);
+  return `${startLabel} - ${endLabel}`;
+}
+
 function durationMinutes(slot) {
   const start = parseTimeToMinutes(slot.start_time);
   const end = parseTimeToMinutes(slot.end_time);
@@ -85,6 +255,7 @@ function normalizeSlot(slot) {
     weekday: Number(slot.weekday),
     start_time: formatMinutesToTime(parseTimeToMinutes(slot.start_time)),
     end_time: formatMinutesToTime(parseTimeToMinutes(slot.end_time)),
+    special_rule: normalizeScheduleRule(slot.special_rule),
   };
 }
 
@@ -127,13 +298,17 @@ function sameWindow(a, b) {
   return a.start_time === b.start_time && a.end_time === b.end_time;
 }
 
-function getSideBySideInfo(daySlots, targetSlot) {
-  const targetMeta = parseAlternatingMeta(targetSlot.slot_key);
-  if (!targetMeta.enabled) return { count: 1, index: 0 };
+function shouldRenderSideBySide(a, b) {
+  if (!sameWindow(a, b)) return false;
+  if (areAlternatingPair(a, b)) return true;
+  return !recurrenceRulesOverlap(a.special_rule, b.special_rule);
+}
 
+function getSideBySideInfo(daySlots, targetSlot) {
   const siblings = daySlots
-    .filter((slot) => sameWindow(slot, targetSlot) && areAlternatingPair(slot, targetSlot))
+    .filter((slot) => slot.id === targetSlot.id || shouldRenderSideBySide(slot, targetSlot))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  if (siblings.length <= 1) return { count: 1, index: 0 };
   return {
     count: siblings.length,
     index: Math.max(
@@ -171,6 +346,7 @@ function overlapsOnDay(slots, targetSlot) {
   return slots.some((slot) => {
     if (slot.id === targetSlot.id) return false;
     if (areAlternatingPair(slot, targetSlot)) return false;
+    if (!recurrenceRulesOverlap(slot.special_rule, targetSlot.special_rule)) return false;
     const start = parseTimeToMinutes(slot.start_time);
     const endRaw = parseTimeToMinutes(slot.end_time);
     const end = endRaw > start ? endRaw : endRaw === 0 ? 24 * 60 : endRaw;
@@ -185,8 +361,7 @@ function AddSlotDialog({ open, onClose, onCreate, shows }) {
     end_time: "10:00",
     show: "",
     timezone: "America/Los_Angeles",
-    alternating_enabled: false,
-    alternating_group: "",
+    special_rule: "every_week",
   });
 
   useEffect(() => {
@@ -258,32 +433,19 @@ function AddSlotDialog({ open, onClose, onCreate, shows }) {
           />
         </label>
 
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={form.alternating_enabled}
-            onChange={(event) =>
-              setForm((prev) => ({
-                ...prev,
-                alternating_enabled: event.target.checked,
-                alternating_group: event.target.checked ? prev.alternating_group : "",
-              }))
-            }
-          />
-          Alternating with another show in this slot
+        <label>
+          Recurrence
+          <select
+            value={form.special_rule}
+            onChange={(event) => setForm((prev) => ({ ...prev, special_rule: normalizeScheduleRule(event.target.value) }))}
+          >
+            {RECURRENCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
-
-        {form.alternating_enabled ? (
-          <label>
-            Alternating Group
-            <input
-              type="text"
-              value={form.alternating_group}
-              onChange={(event) => setForm((prev) => ({ ...prev, alternating_group: event.target.value }))}
-              placeholder="example: tuesday-overnight"
-            />
-          </label>
-        ) : null}
 
         <div className="modal-actions">
           <button className="ghost" onClick={onClose} type="button">
@@ -325,16 +487,13 @@ function EditSlotDialog({
 
   useEffect(() => {
     if (!open || !slot) return;
-    const alternating = parseAlternatingMeta(slot.slot_key);
     setForm({
       weekday: Number(slot.weekday),
       start_time: slot.start_time,
       end_time: slot.end_time,
       show: Number(slot.show),
       timezone: slot.timezone || "America/Los_Angeles",
-      slot_key: slot.slot_key || "",
-      alternating_enabled: alternating.enabled,
-      alternating_group: alternating.group,
+      special_rule: normalizeScheduleRule(slot.special_rule),
     });
   }, [open, slot]);
 
@@ -402,32 +561,19 @@ function EditSlotDialog({
           />
         </label>
 
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={Boolean(form.alternating_enabled)}
-            onChange={(event) =>
-              setForm((prev) => ({
-                ...prev,
-                alternating_enabled: event.target.checked,
-                alternating_group: event.target.checked ? prev.alternating_group : "",
-              }))
-            }
-          />
-          Alternating with another show in this slot
+        <label>
+          Recurrence
+          <select
+            value={form.special_rule}
+            onChange={(event) => setForm((prev) => ({ ...prev, special_rule: normalizeScheduleRule(event.target.value) }))}
+          >
+            {RECURRENCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
-
-        {form.alternating_enabled ? (
-          <label>
-            Alternating Group
-            <input
-              type="text"
-              value={form.alternating_group || ""}
-              onChange={(event) => setForm((prev) => ({ ...prev, alternating_group: event.target.value }))}
-              placeholder="example: tuesday-overnight"
-            />
-          </label>
-        ) : null}
 
         <div className="modal-actions between">
           <button className="danger" onClick={() => onDelete(slot.id)} type="button" disabled={saving}>
@@ -2001,7 +2147,7 @@ function AdminApp() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState(null);
   const [showDetailsShowId, setShowDetailsShowId] = useState(null);
-  const [activeMobileDay, setActiveMobileDay] = useState(7);
+  const [activeMobileDay, setActiveMobileDay] = useState(() => zonedWeekdayNum(new Date(), "America/Los_Angeles"));
   const [viewMode, setViewMode] = useState(() => {
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches) {
       return "day";
@@ -2010,6 +2156,8 @@ function AdminApp() {
   });
   const [activeTab, setActiveTab] = useState("schedule");
   const [adminTitle, setAdminTitle] = useState("KAAD-lp Admin");
+  const [visibleWeekStartLocal, setVisibleWeekStartLocal] = useState(() => getCurrentWeekStartLocal("America/Los_Angeles"));
+  const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [slotMenuId, setSlotMenuId] = useState(null);
   const [tooltipSlotId, setTooltipSlotId] = useState(null);
   const [touchSafeMode, setTouchSafeMode] = useState(() => {
@@ -2025,6 +2173,23 @@ function AdminApp() {
   const [pendingUpdates, setPendingUpdates] = useState({});
   const [pendingDeletes, setPendingDeletes] = useState([]);
   const [committing, setCommitting] = useState(false);
+  const [dismissToast, setDismissToast] = useState("");
+  const effectiveViewMode = touchSafeMode ? "day" : viewMode;
+
+  const scheduleTimezone = useMemo(() => {
+    const slotWithTimezone = slots.find((slot) => String(slot.timezone || "").trim());
+    return slotWithTimezone?.timezone || "America/Los_Angeles";
+  }, [slots]);
+
+  const dayDateByNum = useMemo(() => {
+    const map = new Map();
+    DAYS.forEach((day, index) => {
+      map.set(day.num, shiftDateLocal(visibleWeekStartLocal, index));
+    });
+    return map;
+  }, [visibleWeekStartLocal]);
+
+  const weekRangeLabel = useMemo(() => formatWeekRange(visibleWeekStartLocal), [visibleWeekStartLocal]);
 
   function handleSiteTitlesChange(next = {}) {
     if (next?.adminTitle) {
@@ -2090,6 +2255,24 @@ function AdminApp() {
   }, []);
 
   useEffect(() => {
+    if (!pageMenuOpen) return undefined;
+    function onPointerDown(event) {
+      if (event.target instanceof Element && event.target.closest(".page-menu")) return;
+      setPageMenuOpen(false);
+    }
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [pageMenuOpen]);
+
+  useEffect(() => {
+    if (!dismissToast) return undefined;
+    const timer = setTimeout(() => {
+      setDismissToast("");
+    }, 2200);
+    return () => clearTimeout(timer);
+  }, [dismissToast]);
+
+  useEffect(() => {
     if (typeof document === "undefined") return;
     document.title = adminTitle;
   }, [adminTitle]);
@@ -2102,6 +2285,12 @@ function AdminApp() {
     media.addEventListener("change", syncTouchSafe);
     return () => media.removeEventListener("change", syncTouchSafe);
   }, []);
+
+  useEffect(() => {
+    if (!touchSafeMode) return;
+    setViewMode("day");
+    setActiveMobileDay(zonedWeekdayNum(new Date(), scheduleTimezone));
+  }, [touchSafeMode, scheduleTimezone]);
 
   useEffect(
     () => () => {
@@ -2206,28 +2395,15 @@ function AdminApp() {
   async function handleCreateSlot(formPayload) {
     setError("");
     setInfo("");
-    if (formPayload.alternating_enabled && !String(formPayload.alternating_group || "").trim()) {
-      setError("Alternating Group is required when alternating is enabled.");
-      return;
-    }
-    const slotKey = formPayload.alternating_enabled
-      ? buildAlternatingSlotKey({
-          weekday: Number(formPayload.weekday),
-          startTime: formPayload.start_time,
-          endTime: formPayload.end_time,
-          group: formPayload.alternating_group,
-          previousSlotKey: "",
-        })
-      : "";
     const tempId = `tmp-${tempIdRef.current}`;
     tempIdRef.current += 1;
     const slot = normalizeSlot({
       id: tempId,
-      slot_key: slotKey,
       weekday: Number(formPayload.weekday),
       start_time: formPayload.start_time,
       end_time: formPayload.end_time,
       timezone: formPayload.timezone,
+      special_rule: normalizeScheduleRule(formPayload.special_rule),
       show: Number(formPayload.show),
       show_data: showById.get(Number(formPayload.show)) || null,
     });
@@ -2238,7 +2414,7 @@ function AdminApp() {
         tempId,
         payload: {
           ...formPayload,
-          slot_key: slotKey,
+          special_rule: normalizeScheduleRule(formPayload.special_rule),
         },
       },
     ]);
@@ -2268,10 +2444,6 @@ function AdminApp() {
   }
 
   async function handleSaveSlot(slotId, payload) {
-    if (payload.alternating_enabled && !String(payload.alternating_group || "").trim()) {
-      setError("Alternating Group is required when alternating is enabled.");
-      return;
-    }
     stageSlotUpdate(slotId, payload);
     setInfo("Slot changes staged. Click Commit Changes to save.");
     setEditingSlotId(null);
@@ -2284,21 +2456,7 @@ function AdminApp() {
     const resolvedEnd = payload.end_time == null ? current?.end_time : payload.end_time;
     const resolvedShow = payload.show == null ? current?.show : Number(payload.show);
     const resolvedTimezone = payload.timezone == null ? current?.timezone : payload.timezone;
-    const alternatingEnabled = payload.alternating_enabled == null
-      ? parseAlternatingMeta(payload.slot_key == null ? current?.slot_key : payload.slot_key).enabled
-      : Boolean(payload.alternating_enabled);
-    const alternatingGroup = payload.alternating_group == null
-      ? parseAlternatingMeta(payload.slot_key == null ? current?.slot_key : payload.slot_key).group
-      : String(payload.alternating_group || "");
-    const nextSlotKey = alternatingEnabled
-      ? buildAlternatingSlotKey({
-          weekday: Number(resolvedWeekday),
-          startTime: formatMinutesToTime(parseTimeToMinutes(resolvedStart)),
-          endTime: formatMinutesToTime(parseTimeToMinutes(resolvedEnd)),
-          group: alternatingGroup,
-          previousSlotKey: payload.slot_key == null ? current?.slot_key : payload.slot_key,
-        })
-      : "";
+    const resolvedRule = payload.special_rule == null ? current?.special_rule : payload.special_rule;
 
     const normalized = {
       weekday: Number(resolvedWeekday),
@@ -2306,7 +2464,7 @@ function AdminApp() {
       end_time: formatMinutesToTime(parseTimeToMinutes(resolvedEnd)),
       show: Number(resolvedShow),
       timezone: resolvedTimezone || "America/Los_Angeles",
-      slot_key: nextSlotKey,
+      special_rule: normalizeScheduleRule(resolvedRule),
     };
     setSlots((previous) =>
       previous.map((slot) => {
@@ -2415,6 +2573,26 @@ function AdminApp() {
     });
   }
 
+  function showPreviousWeek() {
+    setVisibleWeekStartLocal((current) => shiftDateLocal(current, -7));
+  }
+
+  function showNextWeek() {
+    setVisibleWeekStartLocal((current) => shiftDateLocal(current, 7));
+  }
+
+  function showCurrentWeek() {
+    setVisibleWeekStartLocal(getCurrentWeekStartLocal(scheduleTimezone));
+  }
+
+  async function discardPendingChanges() {
+    if (committing) return;
+    setError("");
+    setInfo("");
+    await loadData();
+    setDismissToast("Staged changes discarded");
+  }
+
   return (
     <div className={touchSafeMode ? "page-shell touch-safe" : "page-shell"}>
       <header className="topbar">
@@ -2434,107 +2612,44 @@ function AdminApp() {
           </p>
         </div>
         <div className="topbar-actions">
-          <div className="tab-row">
+          <div className="page-menu">
             <button
-              className={activeTab === "schedule" ? "ghost active" : "ghost"}
+              className="ghost page-menu-trigger"
               type="button"
-              aria-pressed={activeTab === "schedule"}
-              onClick={() => setActiveTab("schedule")}
+              aria-haspopup="menu"
+              aria-expanded={pageMenuOpen}
+              aria-label="Open page menu"
+              onClick={() => setPageMenuOpen((value) => !value)}
             >
-              Schedule
+              <span aria-hidden="true">☰</span>
             </button>
-            <button
-              className={activeTab === "shows" ? "ghost active" : "ghost"}
-              type="button"
-              aria-pressed={activeTab === "shows"}
-              onClick={() => setActiveTab("shows")}
-            >
-              Shows
-            </button>
-            <button
-              className={activeTab === "reports" ? "ghost active" : "ghost"}
-              type="button"
-              aria-pressed={activeTab === "reports"}
-              onClick={() => setActiveTab("reports")}
-            >
-              Reporting
-            </button>
-            <button
-              className={activeTab === "stats" ? "ghost active" : "ghost"}
-              type="button"
-              aria-pressed={activeTab === "stats"}
-              onClick={() => setActiveTab("stats")}
-            >
-              Stats
-            </button>
-            <button
-              className={activeTab === "settings" ? "ghost active" : "ghost"}
-              type="button"
-              aria-label="Settings"
-              aria-pressed={activeTab === "settings"}
-              onClick={() => setActiveTab("settings")}
-            >
-              <span className="tab-gear-icon" aria-hidden="true">
-                <svg viewBox="0 0 512 512" role="presentation" focusable="false">
-                  <path d="M195.1 9.5C198.1-5.3 211.2-16 226.4-16l59.8 0c15.2 0 28.3 10.7 31.3 25.5L332 79.5c14.1 6 27.3 13.7 39.3 22.8l67.8-22.5c14.4-4.8 30.2 1.2 37.8 14.4l29.9 51.8c7.6 13.2 4.9 29.8-6.5 39.9L447 233.3c.9 7.4 1.3 15 1.3 22.7s-.5 15.3-1.3 22.7l53.4 47.5c11.4 10.1 14 26.8 6.5 39.9l-29.9 51.8c-7.6 13.1-23.4 19.2-37.8 14.4l-67.8-22.5c-12.1 9.1-25.3 16.7-39.3 22.8l-14.4 69.9c-3.1 14.9-16.2 25.5-31.3 25.5l-59.8 0c-15.2 0-28.3-10.7-31.3-25.5l-14.4-69.9c-14.1-6-27.2-13.7-39.3-22.8L73.5 432.3c-14.4 4.8-30.2-1.2-37.8-14.4L5.8 366.1c-7.6-13.2-4.9-29.8 6.5-39.9l53.4-47.5c-.9-7.4-1.3-15-1.3-22.7s.5-15.3 1.3-22.7L12.3 185.8c-11.4-10.1-14-26.8-6.5-39.9L35.7 94.1c7.6-13.2 23.4-19.2 37.8-14.4l67.8 22.5c12.1-9.1 25.3-16.7 39.3-22.8L195.1 9.5zM256.3 336a80 80 0 1 0 -.6-160 80 80 0 1 0 .6 160z" />
-                </svg>
-              </span>
-            </button>
+            {pageMenuOpen ? (
+              <div className="page-menu-popover" role="menu">
+                {[
+                  { key: "schedule", label: "Schedule" },
+                  { key: "shows", label: "Shows" },
+                  { key: "reports", label: "Reporting" },
+                  { key: "stats", label: "Stats" },
+                  { key: "settings", label: "Settings" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={activeTab === item.key ? "active" : ""}
+                    role="menuitem"
+                    onClick={() => {
+                      setActiveTab(item.key);
+                      setPageMenuOpen(false);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className={activeTab === "schedule" ? "control-row" : "control-row is-hidden"}>
-            <button
-              className={viewMode === "week" ? "ghost active" : "ghost"}
-              type="button"
-              aria-pressed={viewMode === "week"}
-              onClick={() => setViewMode("week")}
-              disabled={activeTab !== "schedule"}
-            >
-              Week
-            </button>
-            <button
-              className={viewMode === "day" ? "ghost active" : "ghost"}
-              type="button"
-              aria-pressed={viewMode === "day"}
-              onClick={() => setViewMode("day")}
-              disabled={activeTab !== "schedule"}
-            >
-              Day
-            </button>
-            <label className={viewMode === "day" && activeTab === "schedule" ? "day-picker" : "day-picker hidden"}>
-              Day
-              <select
-                value={String(activeMobileDay)}
-                onChange={(event) => setActiveMobileDay(Number(event.target.value))}
-                disabled={activeTab !== "schedule" || viewMode !== "day"}
-              >
-                {DAYS.map((day) => (
-                  <option key={day.num} value={String(day.num)}>
-                    {day.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="primary"
-              onClick={handleCommitChanges}
-              type="button"
-              disabled={activeTab !== "schedule" || pendingCount === 0 || committing}
-              title="Commit staged schedule changes"
-            >
-              {committing ? "Committing..." : `Commit Changes (${pendingCount})`}
-            </button>
-            <button
-              className="primary"
-              onClick={() => setAddDialogOpen(true)}
-              type="button"
-              disabled={activeTab !== "schedule"}
-            >
-              Add Slot
-            </button>
-            <button className="ghost" onClick={loadData} type="button" disabled={activeTab !== "schedule"}>
-              Refresh
-            </button>
           </div>
         </div>
       </header>
@@ -2546,8 +2661,77 @@ function AdminApp() {
         {error ? <span className="status-bad">{error}</span> : null}
       </section>
 
+      {activeTab === "schedule" && pendingCount > 0 ? (
+        <div className="staged-fab" role="region" aria-label="Staged schedule changes">
+          <span>{pendingCount} staged</span>
+          <button className="confirm" type="button" onClick={handleCommitChanges} disabled={committing} title="Commit staged changes">
+            {committing ? "..." : "✓"}
+          </button>
+          <button className="dismiss" type="button" onClick={discardPendingChanges} disabled={committing} title="Discard staged changes">
+            X
+          </button>
+        </div>
+      ) : null}
+
+      {dismissToast ? <div className="floating-toast">{dismissToast}</div> : null}
+
       {activeTab === "schedule" ? (
         <>
+          <section className="schedule-toolbar">
+            {!touchSafeMode ? (
+              <div className="schedule-view-controls">
+                <button
+                  className={viewMode === "week" ? "ghost active" : "ghost"}
+                  type="button"
+                  aria-pressed={viewMode === "week"}
+                  onClick={() => setViewMode("week")}
+                >
+                  Week
+                </button>
+                <button
+                  className={viewMode === "day" ? "ghost active" : "ghost"}
+                  type="button"
+                  aria-pressed={viewMode === "day"}
+                  onClick={() => setViewMode("day")}
+                >
+                  Day
+                </button>
+                <label className={viewMode === "day" ? "day-picker" : "day-picker hidden"}>
+                  Day
+                  <select
+                    value={String(activeMobileDay)}
+                    onChange={(event) => setActiveMobileDay(Number(event.target.value))}
+                    disabled={viewMode !== "day"}
+                  >
+                    {DAYS.map((day) => (
+                      <option key={day.num} value={String(day.num)}>
+                        {day.label} {formatDateShort(dayDateByNum.get(day.num))}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            <div className="schedule-toolbar-right">
+              <div className="week-nav" aria-label="Visible calendar week">
+                <button className="ghost" onClick={showPreviousWeek} type="button" aria-label="Previous week">
+                  ←
+                </button>
+                <button className="ghost" onClick={showCurrentWeek} type="button">
+                  Today
+                </button>
+                <button className="ghost" onClick={showNextWeek} type="button" aria-label="Next week">
+                  →
+                </button>
+                <span className="week-range-label">{weekRangeLabel}</span>
+              </div>
+              <button className="add-slot-plus" onClick={() => setAddDialogOpen(true)} type="button" aria-label="Add slot" title="Add slot">
+                +
+              </button>
+            </div>
+          </section>
+
           <section className="mobile-day-tabs">
             {DAYS.map((day) => (
               <button
@@ -2560,12 +2744,12 @@ function AdminApp() {
                   setViewMode("day");
                 }}
               >
-                {day.label}
+                {day.label} {formatDateShort(dayDateByNum.get(day.num))}
               </button>
             ))}
           </section>
 
-          <section className={viewMode === "day" ? "schedule-wrap day-mode" : "schedule-wrap"}>
+          <section className={effectiveViewMode === "day" ? "schedule-wrap day-mode" : "schedule-wrap"}>
             <aside className="hours-column">
               <div className="hours-spacer" />
               <div
@@ -2584,15 +2768,20 @@ function AdminApp() {
               })}
             </aside>
 
-        <div className={viewMode === "day" ? "grid-shell day-mode" : "grid-shell"} ref={gridRef}>
-          {(viewMode === "day" ? DAYS.filter((day) => day.num === activeMobileDay) : DAYS).map((day) => {
-            const daySlots = slotsByDay.get(day.num) || [];
+        <div className={effectiveViewMode === "day" ? "grid-shell day-mode" : "grid-shell"} ref={gridRef}>
+          {(effectiveViewMode === "day" ? DAYS.filter((day) => day.num === activeMobileDay) : DAYS).map((day) => {
+            const daySlotsAll = slotsByDay.get(day.num) || [];
+            const dayDateLocal = dayDateByNum.get(day.num);
+            const daySlots = resolveVisibleSlotsForDate(daySlotsAll, dayDateLocal);
             return (
               <div
                 key={day.num}
                 className="day-column"
               >
-                <header className="day-header">{day.label}</header>
+                <header className="day-header">
+                  <span>{day.label}</span>
+                  <small>{formatDateShort(dayDateByNum.get(day.num))}</small>
+                </header>
                 <div className="day-body" style={{ height: `${GRID_VISIBLE_MINUTES * PX_PER_MINUTE}px` }}>
                   {[0, 7 * 60, ...Array.from({ length: 17 }, (_, index) => (8 + index) * 60)].map((minuteMark) => {
                     return (
@@ -2608,7 +2797,7 @@ function AdminApp() {
                     const show = showById.get(slot.show) || slot.show_data || {};
                     const hasConflict = overlapsOnDay(daySlots, slot);
                     const sideBySide = getSideBySideInfo(daySlots, slot);
-                    const alternating = parseAlternatingMeta(slot.slot_key);
+                    const effectiveRule = getEffectiveRuleForSlot(daySlotsAll.filter((item) => sameWindow(item, slot)), slot);
                     const slotTimeLabel = `${minuteToDisplay(parseTimeToMinutes(slot.start_time))} - ${minuteToDisplay(parseTimeToMinutes(slot.end_time))}`;
                     return (
                       <article
@@ -2709,7 +2898,9 @@ function AdminApp() {
                           </div>
                         </div>
                         <p>{slotTimeLabel}</p>
-                        {alternating.enabled ? <p className="alt-note">Alternating: {alternating.group}</p> : null}
+                        {normalizeScheduleRule(effectiveRule) !== "every_week" ? (
+                          <p className="alt-note">Recurrence: {recurrenceLabel(effectiveRule)}</p>
+                        ) : null}
                         {hasConflict ? <p className="conflict-note">Schedule conflict</p> : null}
                         {!touchSafeMode ? (
                           <div

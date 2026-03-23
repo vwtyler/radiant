@@ -76,6 +76,25 @@ function normalizeWeekday(weekday) {
   return Number.isFinite(num) && num >= 1 && num <= 7 ? num : null;
 }
 
+function normalizeScheduleRule(value) {
+  const text = String(value == null ? "" : value)
+    .trim()
+    .toLowerCase();
+  if (!text || text === "every_week" || text === "weekly") return "every_week";
+  if (text === "first_third" || text === "first_and_third" || text === "1st_3rd") return "first_third";
+  if (text === "second_fourth" || text === "second_and_fourth" || text === "2nd_4th") return "second_fourth";
+  if (text === "fifth" || text === "5th") return "fifth";
+  return "every_week";
+}
+
+function parseAlternatingGroupFromSlotKey(slotKey) {
+  const raw = String(slotKey || "");
+  if (!raw.startsWith("altgrp:")) return "";
+  const rest = raw.slice("altgrp:".length);
+  const [group] = rest.split("::");
+  return String(group || "").trim().toLowerCase();
+}
+
 function parseClockToMinutes(input) {
   if (!input || typeof input !== "string") return null;
   const normalized = input.trim().toLowerCase();
@@ -1158,7 +1177,7 @@ async function getShowsByIds(showIds) {
 
 async function fetchScheduleSlots() {
   return directusRequest("/items/schedule_slots", {
-    fields: "id,slot_key,weekday,start_time,end_time,timezone,show",
+    fields: "id,slot_key,weekday,start_time,end_time,timezone,special_rule,show",
     sort: "weekday,start_time",
     limit: "-1",
   });
@@ -1185,6 +1204,91 @@ function slotMatchesMoment(slot, zoned) {
   return zoned.minuteOfDay >= start || zoned.minuteOfDay < end;
 }
 
+function getWeekdayOccurrenceInMonth(dateLocal) {
+  const parts = parseDateParts(dateLocal);
+  if (!parts) return null;
+  return Math.floor((parts.d - 1) / 7) + 1;
+}
+
+function withEffectiveRulesForWindowRows(groupRows) {
+  const rows = Array.isArray(groupRows) ? groupRows : [];
+  const normalized = rows.map((row) => ({ row, explicitRule: normalizeScheduleRule(row?.special_rule) }));
+  const hasExplicitAlternatingRule = normalized.some((item) => item.explicitRule !== "every_week");
+  if (hasExplicitAlternatingRule) {
+    return normalized.map((item) => ({ ...item.row, _effective_rule: item.explicitRule }));
+  }
+
+  const byGroup = new Map();
+  for (const item of normalized) {
+    const group = parseAlternatingGroupFromSlotKey(item.row?.slot_key);
+    if (!group) continue;
+    if (!byGroup.has(group)) byGroup.set(group, []);
+    byGroup.get(group).push(item.row);
+  }
+
+  const derivedRuleById = new Map();
+  const implied = ["first_third", "second_fourth", "fifth"];
+  for (const groupedRows of byGroup.values()) {
+    if (groupedRows.length < 2) continue;
+    const sorted = [...groupedRows].sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    sorted.forEach((row, index) => {
+      derivedRuleById.set(row.id, implied[Math.min(index, implied.length - 1)]);
+    });
+  }
+
+  return normalized.map((item) => ({
+    ...item.row,
+    _effective_rule: derivedRuleById.get(item.row?.id) || item.explicitRule,
+  }));
+}
+
+function slotAppliesOnDate(slot, dateLocal) {
+  const rule = normalizeScheduleRule(slot?._effective_rule || slot?.special_rule);
+  const occurrence = getWeekdayOccurrenceInMonth(dateLocal);
+  if (!occurrence) return false;
+  if (rule === "first_third") return occurrence === 1 || occurrence === 3;
+  if (rule === "second_fourth") return occurrence === 2 || occurrence === 4;
+  if (rule === "fifth") return occurrence === 5;
+  return true;
+}
+
+function scheduleRuleSpecificity(slot) {
+  return normalizeScheduleRule(slot?._effective_rule || slot?.special_rule) === "every_week" ? 0 : 1;
+}
+
+function selectSlotForDate(candidates, dateLocal) {
+  const rows = Array.isArray(candidates) ? candidates : [];
+  if (!rows.length) return null;
+
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = `${row.start_time}|${row.end_time}|${row.timezone || ""}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  }
+
+  const resolved = [];
+  for (const groupRows of grouped.values()) {
+    const rowsWithRules = withEffectiveRulesForWindowRows(groupRows);
+    const applicable = rowsWithRules.filter((row) => slotAppliesOnDate(row, dateLocal));
+    if (!applicable.length) continue;
+    applicable.sort((a, b) => {
+      const specificityDiff = scheduleRuleSpecificity(b) - scheduleRuleSpecificity(a);
+      if (specificityDiff !== 0) return specificityDiff;
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+    resolved.push(applicable[0]);
+  }
+
+  if (!resolved.length) return null;
+  resolved.sort((a, b) => {
+    const startDiff = parseClockToMinutes(a.start_time) - parseClockToMinutes(b.start_time);
+    if (startDiff !== 0) return startDiff;
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+  return resolved[0];
+}
+
 function pickActiveOverride(overrides, atIso) {
   const at = new Date(atIso).getTime();
   const active = overrides.filter((row) => {
@@ -1201,8 +1305,9 @@ async function resolveLiveSchedule(atIso, timezone) {
   const slots = await fetchScheduleSlots();
   const overrides = await fetchScheduleOverrides();
   const zoned = getZonedParts(at, timezone);
-
-  const slot = slots.find((row) => slotMatchesMoment(row, zoned)) || null;
+  const dateLocal = toDateOnlyString(zoned);
+  const slotCandidates = slots.filter((row) => slotMatchesMoment(row, zoned));
+  const slot = selectSlotForDate(slotCandidates, dateLocal);
   const override = pickActiveOverride(overrides, at.toISOString());
 
   const showIds = [];
@@ -1222,6 +1327,7 @@ async function resolveLiveSchedule(atIso, timezone) {
             start_time: slot.start_time,
             end_time: slot.end_time,
             timezone: slot.timezone,
+            special_rule: normalizeScheduleRule(slot._effective_rule || slot.special_rule),
           }
         : null,
       override: {
@@ -1246,6 +1352,7 @@ async function resolveLiveSchedule(atIso, timezone) {
         start_time: slot.start_time,
         end_time: slot.end_time,
         timezone: slot.timezone,
+        special_rule: normalizeScheduleRule(slot._effective_rule || slot.special_rule),
       },
       override: null,
     };
@@ -1389,17 +1496,34 @@ async function buildScheduleWeek(weekStartInput, timezone) {
   for (let i = 0; i < 7; i += 1) {
     const date = shiftDate(weekStart, i);
     const weekday = i + 1;
-    const daySlots = slots
-      .filter((row) => Number(row.weekday) === weekday)
-      .map((row) => ({
-        kind: "slot",
-        id: row.id,
-        weekday: Number(row.weekday),
-        start_time: row.start_time,
-        end_time: row.end_time,
-        timezone: row.timezone,
-        show: safeShowSummary(showsById[row.show] || null),
-      }));
+    const dayCandidates = slots.filter((row) => Number(row.weekday) === weekday);
+    const groupedCandidates = new Map();
+    for (const row of dayCandidates) {
+      const key = `${row.start_time}|${row.end_time}|${row.timezone || ""}`;
+      if (!groupedCandidates.has(key)) groupedCandidates.set(key, []);
+      groupedCandidates.get(key).push(row);
+    }
+    const resolvedDaySlots = [];
+    for (const rows of groupedCandidates.values()) {
+      const picked = selectSlotForDate(rows, date);
+      if (picked) resolvedDaySlots.push(picked);
+    }
+    resolvedDaySlots.sort((a, b) => {
+      const startDiff = parseClockToMinutes(a.start_time) - parseClockToMinutes(b.start_time);
+      if (startDiff !== 0) return startDiff;
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+
+    const daySlots = resolvedDaySlots.map((row) => ({
+      kind: "slot",
+      id: row.id,
+      weekday: Number(row.weekday),
+      start_time: row.start_time,
+      end_time: row.end_time,
+      timezone: row.timezone,
+      special_rule: normalizeScheduleRule(row._effective_rule || row.special_rule),
+      show: safeShowSummary(showsById[row.show] || null),
+    }));
 
     const dayOverrides = overrides
       .filter((row) => row.start_at && row.start_at.startsWith(date))
@@ -1442,7 +1566,7 @@ async function buildShowDetails(slug) {
 
   const slots = await directusRequest("/items/schedule_slots", {
     "filter[show][_eq]": String(show.id),
-    fields: "id,weekday,start_time,end_time,timezone",
+    fields: "id,weekday,start_time,end_time,timezone,special_rule",
     sort: "weekday,start_time",
     limit: "-1",
   });
@@ -1653,6 +1777,7 @@ function validateScheduleSlotPayload(input, existing = null) {
   const timezone = input.timezone == null ? existing?.timezone : String(input.timezone);
   const show = input.show == null ? existing?.show : Number(input.show);
   const slotKey = input.slot_key == null ? existing?.slot_key : String(input.slot_key);
+  const specialRule = input.special_rule == null ? existing?.special_rule : input.special_rule;
 
   if (!Number.isInteger(Number(weekday)) || Number(weekday) < 1 || Number(weekday) > 7) {
     throw new Error("weekday must be between 1 and 7");
@@ -1677,6 +1802,7 @@ function validateScheduleSlotPayload(input, existing = null) {
     start_time: formatMinutesToTime(start),
     end_time: formatMinutesToTime(end),
     timezone: timezone || defaultTimezone,
+    special_rule: normalizeScheduleRule(specialRule),
     show: Number(show),
   };
 }
@@ -1734,7 +1860,7 @@ async function createAlternatingOverrides(payload) {
 
   const rows = await directusRequest("/items/schedule_slots", {
     "filter[id][_eq]": String(baseSlotId),
-    fields: "id,weekday,start_time,end_time,timezone,show",
+    fields: "id,weekday,start_time,end_time,timezone,special_rule,show",
     limit: "1",
   });
   const slot = rows[0] || null;
@@ -2096,7 +2222,7 @@ async function detachDjFromShow(showId, djId) {
 
 async function buildAdminScheduleSlots() {
   const rows = await directusRequest("/items/schedule_slots", {
-    fields: "id,slot_key,weekday,start_time,end_time,timezone,show",
+    fields: "id,slot_key,weekday,start_time,end_time,timezone,special_rule,show",
     sort: "weekday,start_time",
     limit: "-1",
   });
@@ -2111,6 +2237,7 @@ async function buildAdminScheduleSlots() {
       start_time: row.start_time,
       end_time: row.end_time,
       timezone: row.timezone || defaultTimezone,
+      special_rule: normalizeScheduleRule(row.special_rule),
       show: row.show,
       show_data: safeShowSummary(showsById[row.show] || null),
     })),
@@ -2141,6 +2268,7 @@ function buildRecentBroadcastsForSlots(slots, timezone, limit = 2, options = {})
 
     for (const weekOffset of [0, 7, 14]) {
       const dateLocal = shiftDate(today, -(daysBack + weekOffset));
+      if (!slotAppliesOnDate(slot, dateLocal)) continue;
       const isToday = weekOffset === 0 && daysBack === 0;
       if (isToday && zonedNow.minuteOfDay < end && !includeCurrent) continue;
 
@@ -2175,7 +2303,7 @@ async function buildAdminShowInsights(showId, options = {}) {
 
   const slotRows = await directusRequest("/items/schedule_slots", {
     "filter[show][_eq]": String(id),
-    fields: "id,weekday,start_time,end_time,timezone",
+    fields: "id,weekday,start_time,end_time,timezone,special_rule",
     sort: "weekday,start_time",
     limit: "-1",
   });
@@ -2840,7 +2968,7 @@ const server = http.createServer((req, res) => {
       }
       const existingRows = await directusRequest("/items/schedule_slots", {
         "filter[id][_eq]": String(id),
-        fields: "id,slot_key,weekday,start_time,end_time,timezone,show",
+        fields: "id,slot_key,weekday,start_time,end_time,timezone,special_rule,show",
         limit: "1",
       });
       const existing = existingRows[0] || null;
