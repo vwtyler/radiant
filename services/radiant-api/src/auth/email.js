@@ -1,49 +1,68 @@
-const nodemailer = require('nodemailer');
+const https = require('https');
+const querystring = require('querystring');
 
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.mailgun.org';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT) || 587;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
-const SMTP_FROM = process.env.SMTP_FROM || 'noreply@kaad-lp.org';
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || 'mg.kaad-lp.org';
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY || process.env.SMTP_PASSWORD;
+const MAILGUN_FROM = process.env.MAILGUN_FROM || process.env.SMTP_FROM || 'noreply@kaad-lp.org';
 
-let transporter = null;
-
-function getTransporter() {
-  if (!transporter) {
-    if (!SMTP_USER || !SMTP_PASSWORD) {
-      console.warn('SMTP credentials not configured, emails will not be sent');
-      return null;
+function sendMailgunEmail({ to, subject, text, html }) {
+  return new Promise((resolve, reject) => {
+    if (!MAILGUN_API_KEY) {
+      console.warn('MAILGUN_API_KEY not configured, email will be logged but not sent');
+      console.log(`[EMAIL MOCK] To: ${to}, Subject: ${subject}`);
+      resolve({ success: true, mock: true });
+      return;
     }
-    
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASSWORD
-      }
+
+    const auth = Buffer.from(`api:${MAILGUN_API_KEY}`).toString('base64');
+    const data = querystring.stringify({
+      from: MAILGUN_FROM,
+      to: to,
+      subject: subject,
+      text: text,
+      html: html
     });
-  }
-  return transporter;
+
+    const options = {
+      hostname: 'api.mailgun.net',
+      port: 443,
+      path: `/v3/${MAILGUN_DOMAIN}/messages`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(data),
+        'Authorization': `Basic ${auth}`
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => responseData += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ success: true });
+        } else {
+          console.error('Mailgun API error:', res.statusCode, responseData);
+          reject(new Error(`Mailgun API error: ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      console.error('Mailgun request error:', error);
+      reject(error);
+    });
+
+    req.write(data);
+    req.end();
+  });
 }
 
 async function sendInvitationEmail({ to, token, role, invitedBy }) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log(`[EMAIL MOCK] Invitation to ${to} with token ${token}`);
-    return { success: true, mock: true };
-  }
-  
   const roleDisplay = role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-  const acceptUrl = `https://admin.kaad-lp.org/accept-invitation/${token}`;
-  
-  try {
-    await transporter.sendMail({
-      from: `"KAAD-LP Admin" <${SMTP_FROM}>`,
-      to,
-      subject: `You've been invited to manage KAAD-LP as ${roleDisplay}`,
-      text: `Hello,
+  const acceptUrl = `https://admin.kaad-lp.org/accept-invite?token=${token}`;
+
+  const text = `Hello,
 
 You've been invited to join the KAAD-LP admin panel as a ${roleDisplay}.
 
@@ -55,8 +74,9 @@ This link expires in 7 days.
 If you didn't expect this invitation, you can ignore this email.
 
 Best regards,
-KAAD-LP Team`,
-      html: `<!DOCTYPE html>
+KAAD-LP Team`;
+
+  const html = `<!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
   <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -89,10 +109,10 @@ KAAD-LP Team`,
     </p>
   </div>
 </body>
-</html>`
-    });
-    
-    return { success: true };
+</html>`;
+
+  try {
+    return await sendMailgunEmail({ to, subject: `You've been invited to manage KAAD-LP as ${roleDisplay}`, text, html });
   } catch (error) {
     console.error('Failed to send invitation email:', error);
     return { success: false, error: error.message };
@@ -100,20 +120,9 @@ KAAD-LP Team`,
 }
 
 async function sendPasswordResetEmail({ to, token }) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log(`[EMAIL MOCK] Password reset to ${to} with token ${token}`);
-    return { success: true, mock: true };
-  }
-  
-  const resetUrl = `https://admin.kaad-lp.org/reset-password/${token}`;
-  
-  try {
-    await transporter.sendMail({
-      from: `"KAAD-LP Admin" <${SMTP_FROM}>`,
-      to,
-      subject: 'Reset your KAAD-LP admin password',
-      text: `Hello,
+  const resetUrl = `https://admin.kaad-lp.org/reset-password?token=${token}`;
+
+  const text = `Hello,
 
 We received a request to reset your KAAD-LP admin password.
 
@@ -125,8 +134,9 @@ This link expires in 1 hour.
 If you didn't request this reset, you can ignore this email.
 
 Best regards,
-KAAD-LP Team`,
-      html: `<!DOCTYPE html>
+KAAD-LP Team`;
+
+  const html = `<!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
   <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -159,10 +169,10 @@ KAAD-LP Team`,
     </p>
   </div>
 </body>
-</html>`
-    });
-    
-    return { success: true };
+</html>`;
+
+  try {
+    return await sendMailgunEmail({ to, subject: 'Reset your KAAD-LP admin password', text, html });
   } catch (error) {
     console.error('Failed to send password reset email:', error);
     return { success: false, error: error.message };
@@ -170,20 +180,9 @@ KAAD-LP Team`,
 }
 
 async function sendWelcomeEmail({ to, role }) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log(`[EMAIL MOCK] Welcome to ${to}`);
-    return { success: true, mock: true };
-  }
-  
   const roleDisplay = role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-  
-  try {
-    await transporter.sendMail({
-      from: `"KAAD-LP Admin" <${SMTP_FROM}>`,
-      to,
-      subject: 'Welcome to KAAD-LP Admin',
-      text: `Hello,
+
+  const text = `Hello,
 
 Your KAAD-LP admin account has been successfully set up as a ${roleDisplay}.
 
@@ -191,8 +190,9 @@ You can now log in at:
 https://admin.kaad-lp.org
 
 Best regards,
-KAAD-LP Team`,
-      html: `<!DOCTYPE html>
+KAAD-LP Team`;
+
+  const html = `<!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
   <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -217,10 +217,10 @@ KAAD-LP Team`,
     </p>
   </div>
 </body>
-</html>`
-    });
-    
-    return { success: true };
+</html>`;
+
+  try {
+    return await sendMailgunEmail({ to, subject: 'Welcome to KAAD-LP Admin', text, html });
   } catch (error) {
     console.error('Failed to send welcome email:', error);
     return { success: false, error: error.message };

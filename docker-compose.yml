@@ -120,11 +120,9 @@ services:
       ICECAST_GEO_CACHE_SUCCESS_TTL_MS: ${ICECAST_GEO_CACHE_SUCCESS_TTL_MS:-2592000000}
       ICECAST_GEO_CACHE_FAILURE_TTL_MS: ${ICECAST_GEO_CACHE_FAILURE_TTL_MS:-300000}
       JWT_SECRET: ${JWT_SECRET}
-      SMTP_HOST: ${SMTP_HOST:-smtp.mailgun.org}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASSWORD: ${SMTP_PASSWORD}
-      SMTP_FROM: ${SMTP_FROM:-noreply@kaad-lp.org}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-mg.kaad-lp.org}
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY}
+      MAILGUN_FROM: ${MAILGUN_FROM:-noreply@kaad-lp.org}
     volumes:
       - radiant_api_data:/app/data
     ports:
