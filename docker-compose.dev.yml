@@ -1,0 +1,44 @@
+# Docker Compose Development Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# 
+# This file provides local development configuration:
+# - Source code mounted for hot reload
+# - API runs on localhost:3000
+# - Admin dev server on localhost:5173
+# - Directus on localhost:1337
+
+services:
+  radiant-api:
+    environment:
+      NODE_ENV: development
+      # Override for local dev - API should accept connections from host
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for development hot reload
+      - ./services/radiant-api/src:/app/src:ro
+    # Override command to run with nodemon or similar for auto-restart
+    command: ["node", "src/server.js"]
+
+  radiant-admin:
+    environment:
+      NODE_ENV: development
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount source for hot reload
+      - ./services/radiant-admin/src:/app/src:ro
+      - ./services/radiant-admin/index.html:/app/index.html:ro
+    # Override to run dev server instead of build
+    command: ["npm", "run", "dev"]
+
+  directus:
+    ports:
+      # Expose Directus for local dev
+      - "1337:8055"
+
+  postgres:
+    ports:
+      # Allow local connections for debugging
+      - "5432:5432"
