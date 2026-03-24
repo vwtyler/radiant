@@ -48,7 +48,7 @@ services:
       - directus_uploads:/directus/uploads
       - directus_extensions:/directus/extensions
     ports:
-      - "0.0.0.0:1337:8055"
+      - "127.0.0.1:11337:8055"
     healthcheck:
       test:
         [
@@ -73,7 +73,7 @@ services:
       VITE_API_BASE_URL: ${RADIANT_ADMIN_API_BASE_URL:-http://localhost:3000}
       VITE_ADMIN_TOKEN: ${RADIANT_ADMIN_TOKEN}
     ports:
-      - "0.0.0.0:5173:5173"
+      - "127.0.0.1:15173:5173"
 
   radiant-api:
     build:
@@ -119,10 +119,16 @@ services:
       ICECAST_SNAPSHOT_CACHE_MS: ${ICECAST_SNAPSHOT_CACHE_MS:-20000}
       ICECAST_GEO_CACHE_SUCCESS_TTL_MS: ${ICECAST_GEO_CACHE_SUCCESS_TTL_MS:-2592000000}
       ICECAST_GEO_CACHE_FAILURE_TTL_MS: ${ICECAST_GEO_CACHE_FAILURE_TTL_MS:-300000}
+      JWT_SECRET: ${JWT_SECRET}
+      SMTP_HOST: ${SMTP_HOST:-smtp.mailgun.org}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:-noreply@kaad-lp.org}
     volumes:
       - radiant_api_data:/app/data
     ports:
-      - "0.0.0.0:3000:3000"
+      - "127.0.0.1:13000:3000"
 
 volumes:
   postgres_data:

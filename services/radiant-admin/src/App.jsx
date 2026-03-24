@@ -3,6 +3,7 @@ import { geoGraticule10, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import countries110m from "world-atlas/countries-110m.json";
 import { apiAdapter } from "./lib/apiAdapter";
+import { AuthProvider, useAuth, LoginPage, UserMenu, AcceptInvitePage, ForgotPasswordPage, ResetPasswordPage } from "./auth";
 
 const DAYS = [
   { num: 7, label: "Sun" },
@@ -2660,6 +2661,7 @@ function AdminApp() {
         {info ? <span className="status-good">{info}</span> : null}
         {error ? <span className="status-bad">{error}</span> : null}
       </section>
+      <UserMenu />
 
       {activeTab === "schedule" && pendingCount > 0 ? (
         <div className="staged-fab" role="region" aria-label="Staged schedule changes">
@@ -2958,10 +2960,64 @@ function AdminApp() {
   );
 }
 
+function AdminAppWithAuth() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return <AdminApp />;
+}
+
 export function App() {
-  const isPublicStatusRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/status");
-  if (isPublicStatusRoute) {
+  const path = typeof window !== "undefined" ? window.location.pathname : "";
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  
+  // Public routes that don't require auth
+  if (path.startsWith("/status")) {
     return <PublicStatusPage />;
   }
-  return <AdminApp />;
+  
+  // Auth flow routes
+  if (path === "/accept-invite" || search.includes("token=")) {
+    return (
+      <AuthProvider>
+        <AcceptInvitePage />
+      </AuthProvider>
+    );
+  }
+  
+  if (path === "/forgot-password") {
+    return (
+      <AuthProvider>
+        <ForgotPasswordPage />
+      </AuthProvider>
+    );
+  }
+  
+  if (path === "/reset-password") {
+    return (
+      <AuthProvider>
+        <ResetPasswordPage />
+      </AuthProvider>
+    );
+  }
+  
+  // Main admin app with auth
+  return (
+    <AuthProvider>
+      <AdminAppWithAuth />
+    </AuthProvider>
+  );
 }

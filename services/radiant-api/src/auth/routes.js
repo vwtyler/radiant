@@ -42,7 +42,7 @@ async function createAuthRoutes(pool) {
 
         // Find user
         const userResult = await query(
-          'SELECT id, email, password_hash, role, status, dj_id FROM admin_users WHERE email = $1',
+          'SELECT id, email, password_hash, role, status, dj_id FROM app_admin_users WHERE email = $1',
           [email.toLowerCase().trim()]
         );
 
@@ -63,7 +63,7 @@ async function createAuthRoutes(pool) {
         }
 
         // Update last login
-        await query('UPDATE admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        await query('UPDATE app_admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
         // Create session
         const accessToken = sign(
@@ -86,7 +86,7 @@ async function createAuthRoutes(pool) {
         const clientInfo = getClientInfo(req);
 
         await query(
-          `INSERT INTO admin_sessions (user_id, token, refresh_token, expires_at, refresh_expires_at, ip_address, user_agent)
+          `INSERT INTO app_admin_sessions (user_id, token, refresh_token, expires_at, refresh_expires_at, ip_address, user_agent)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [user.id, accessToken, refreshToken, expiresAt, refreshExpiresAt, clientInfo.ip, clientInfo.userAgent]
         );
@@ -117,7 +117,7 @@ async function createAuthRoutes(pool) {
         }
 
         const token = authHeader.slice(7);
-        await query('DELETE FROM admin_sessions WHERE token = $1', [token]);
+        await query('DELETE FROM app_admin_sessions WHERE token = $1', [token]);
 
         return sendJson(res, 200, { message: 'Logged out' }, corsHeaders);
       } catch (error) {
@@ -139,8 +139,8 @@ async function createAuthRoutes(pool) {
         // Find session with valid refresh token
         const sessionResult = await query(
           `SELECT s.id, s.user_id, s.refresh_expires_at, u.email, u.role, u.dj_id, u.status
-           FROM admin_sessions s
-           JOIN admin_users u ON s.user_id = u.id
+           FROM app_admin_sessions s
+           JOIN app_admin_users u ON s.user_id = u.id
            WHERE s.refresh_token = $1 AND s.refresh_expires_at > NOW()`,
           [refreshToken]
         );
@@ -166,7 +166,7 @@ async function createAuthRoutes(pool) {
 
         // Update session
         await query(
-          'UPDATE admin_sessions SET token = $1, expires_at = $2 WHERE id = $3',
+          'UPDATE app_admin_sessions SET token = $1, expires_at = $2 WHERE id = $3',
           [accessToken, expiresAt, session.id]
         );
 
@@ -201,7 +201,7 @@ async function createAuthRoutes(pool) {
 
         // Check if user already exists
         const existingResult = await query(
-          'SELECT id FROM admin_users WHERE email = $1',
+          'SELECT id FROM app_admin_users WHERE email = $1',
           [email.toLowerCase().trim()]
         );
 
@@ -211,7 +211,7 @@ async function createAuthRoutes(pool) {
 
         // Check for existing pending invitation
         const existingInviteResult = await query(
-          'SELECT id FROM admin_invitations WHERE email = $1 AND accepted_at IS NULL AND expires_at > NOW()',
+          'SELECT id FROM app_admin_invitations WHERE email = $1 AND accepted_at IS NULL AND expires_at > NOW()',
           [email.toLowerCase().trim()]
         );
 
@@ -225,7 +225,7 @@ async function createAuthRoutes(pool) {
         expiresAt.setDate(expiresAt.getDate() + INVITATION_EXPIRY_DAYS);
 
         await query(
-          `INSERT INTO admin_invitations (email, token, role, dj_id, invited_by, expires_at)
+          `INSERT INTO app_admin_invitations (email, token, role, dj_id, invited_by, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6)`,
           [email.toLowerCase().trim(), token, role, djId || null, currentUser.userId, expiresAt]
         );
@@ -273,7 +273,7 @@ async function createAuthRoutes(pool) {
 
         // Find valid invitation
         const inviteResult = await query(
-          `SELECT id, email, role, dj_id FROM admin_invitations 
+          `SELECT id, email, role, dj_id FROM app_admin_invitations 
            WHERE token = $1 AND accepted_at IS NULL AND expires_at > NOW()`,
           [token]
         );
@@ -286,7 +286,7 @@ async function createAuthRoutes(pool) {
 
         // Check if user already exists
         const existingResult = await query(
-          'SELECT id FROM admin_users WHERE email = $1',
+          'SELECT id FROM app_admin_users WHERE email = $1',
           [invitation.email]
         );
 
@@ -299,7 +299,7 @@ async function createAuthRoutes(pool) {
 
         // Create user
         const userResult = await query(
-          `INSERT INTO admin_users (email, password_hash, role, dj_id, status, email_verified)
+          `INSERT INTO app_admin_users (email, password_hash, role, dj_id, status, email_verified)
            VALUES ($1, $2, $3, $4, 'active', true)
            RETURNING id`,
           [invitation.email, passwordHash, invitation.role, invitation.dj_id]
@@ -308,7 +308,7 @@ async function createAuthRoutes(pool) {
         const userId = userResult.rows[0].id;
 
         // Mark invitation as accepted
-        await query('UPDATE admin_invitations SET accepted_at = NOW() WHERE id = $1', [invitation.id]);
+        await query('UPDATE app_admin_invitations SET accepted_at = NOW() WHERE id = $1', [invitation.id]);
 
         // Send welcome email
         await sendWelcomeEmail({
@@ -338,7 +338,7 @@ async function createAuthRoutes(pool) {
 
         // Find user
         const userResult = await query(
-          'SELECT id, email FROM admin_users WHERE email = $1 AND status = $2',
+          'SELECT id, email FROM app_admin_users WHERE email = $1 AND status = $2',
           [email.toLowerCase().trim(), 'active']
         );
 
@@ -350,7 +350,7 @@ async function createAuthRoutes(pool) {
         const user = userResult.rows[0];
 
         // Invalidate existing tokens
-        await query('UPDATE admin_password_resets SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL', [user.id]);
+        await query('UPDATE app_password_resets SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL', [user.id]);
 
         // Create reset token
         const token = generateToken();
@@ -358,7 +358,7 @@ async function createAuthRoutes(pool) {
         expiresAt.setHours(expiresAt.getHours() + PASSWORD_RESET_EXPIRY_HOURS);
 
         await query(
-          'INSERT INTO admin_password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
+          'INSERT INTO app_password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
           [user.id, token, expiresAt]
         );
 
@@ -393,7 +393,7 @@ async function createAuthRoutes(pool) {
 
         // Find valid reset token
         const resetResult = await query(
-          `SELECT id, user_id FROM admin_password_resets 
+          `SELECT id, user_id FROM app_password_resets 
            WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
           [token]
         );
@@ -408,13 +408,13 @@ async function createAuthRoutes(pool) {
         const passwordHash = await hash(password);
 
         // Update user password
-        await query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.user_id]);
+        await query('UPDATE app_admin_users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.user_id]);
 
         // Mark token as used
-        await query('UPDATE admin_password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
+        await query('UPDATE app_password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
 
         // Delete all sessions for this user (force re-login)
-        await query('DELETE FROM admin_sessions WHERE user_id = $1', [reset.user_id]);
+        await query('DELETE FROM app_admin_sessions WHERE user_id = $1', [reset.user_id]);
 
         return sendJson(res, 200, { message: 'Password reset successfully' }, corsHeaders);
       } catch (error) {
@@ -428,7 +428,7 @@ async function createAuthRoutes(pool) {
       try {
         const result = await query(
           `SELECT id, email, role, status, dj_id, created_at, last_login_at 
-           FROM admin_users WHERE id = $1`,
+           FROM app_admin_users WHERE id = $1`,
           [currentUser.userId]
         );
 
