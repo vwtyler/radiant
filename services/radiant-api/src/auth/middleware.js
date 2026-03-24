@@ -22,7 +22,7 @@ async function authMiddleware(req, pool) {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        'SELECT id FROM admin_sessions WHERE token = $1 AND expires_at > NOW()',
+        'SELECT id FROM app_admin_sessions WHERE token = $1 AND expires_at > NOW()',
         [token]
       );
 
@@ -42,7 +42,7 @@ async function authMiddleware(req, pool) {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        'SELECT status FROM admin_users WHERE id = $1',
+        'SELECT status FROM app_admin_users WHERE id = $1',
         [payload.userId]
       );
 
