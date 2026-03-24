@@ -1,0 +1,17 @@
+{
+  "name": "radiant-api",
+  "version": "1.0.0",
+  "description": "KAAD-LP Radiant API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.0",
+    "pg": "^8.11.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
