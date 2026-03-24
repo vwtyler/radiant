@@ -4,6 +4,19 @@ const fs = require("node:fs/promises");
 const pathModule = require("node:path");
 const { URL } = require("node:url");
 
+// Auth imports
+const { pool } = require("./db");
+const { createAuthRoutes } = require("./auth/routes");
+const { authMiddleware, requireAuth, requireRole } = require("./auth/middleware");
+
+let authRoutes = null;
+async function initAuthRoutes() {
+  if (!authRoutes) {
+    authRoutes = await createAuthRoutes(pool);
+  }
+  return authRoutes;
+}
+
 const port = Number(process.env.PORT || 3000);
 const apiVersion = process.env.API_VERSION || "v1";
 const startedAt = new Date().toISOString();
@@ -36,6 +49,11 @@ const icecastGeoCachePath = process.env.ICECAST_GEO_CACHE_PATH || "/app/data/ice
 const icecastGeoCacheSuccessTtlMs = Number(process.env.ICECAST_GEO_CACHE_SUCCESS_TTL_MS || 30 * 24 * 60 * 60 * 1000);
 const icecastGeoCacheFailureTtlMs = Number(process.env.ICECAST_GEO_CACHE_FAILURE_TTL_MS || 5 * 60 * 1000);
 const icecastSnapshotCacheMs = Number(process.env.ICECAST_SNAPSHOT_CACHE_MS || 20000);
+const jwtSecret = process.env.JWT_SECRET;
+
+if (!jwtSecret) {
+  console.warn("JWT_SECRET not set. Auth system will not work properly.");
+}
 
 function parseBooleanEnv(value, fallback = false) {
   const text = String(value == null ? "" : value)
@@ -2633,9 +2651,56 @@ const server = http.createServer((req, res) => {
     );
   }
 
+  // Auth routes
+  if (path.startsWith(`/${apiVersion}/admin/auth/`)) {
+    await initAuthRoutes();
+
+    if (path === `/${apiVersion}/admin/auth/login` && req.method === "POST") {
+      return authRoutes.login(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/logout` && req.method === "POST") {
+      return authRoutes.logout(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/refresh` && req.method === "POST") {
+      return authRoutes.refresh(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/invite` && req.method === "POST") {
+      const auth = await authMiddleware(req, pool);
+      if (!auth.authenticated) {
+        return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+      }
+      return authRoutes.invite(req, res, corsHeaders, auth.user);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/accept` && req.method === "POST") {
+      return authRoutes.accept(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/forgot` && req.method === "POST") {
+      return authRoutes.forgot(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/reset` && req.method === "POST") {
+      return authRoutes.reset(req, res, corsHeaders);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/me` && req.method === "GET") {
+      const auth = await authMiddleware(req, pool);
+      if (!auth.authenticated) {
+        return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+      }
+      return authRoutes.me(req, res, corsHeaders, auth.user);
+    }
+  }
+
   if (path.startsWith(`/${apiVersion}/admin/`)) {
-    if (!isValidAdminRequest(req)) {
-      return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+    // Validate JWT token instead of static admin token
+    const auth = await authMiddleware(req, pool);
+    if (!auth.authenticated) {
+      return sendJson(res, 401, { error: "unauthorized", message: auth.error }, corsHeaders);
     }
 
     if (path === `/${apiVersion}/admin/shows` && req.method === "GET") {
