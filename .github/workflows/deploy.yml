@@ -16,7 +16,4 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/radiant
-            git pull origin main
-            docker compose up -d --build
-            docker compose ps
+            ~/radiant/scripts/deploy.sh
