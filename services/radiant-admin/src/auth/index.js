@@ -5,3 +5,4 @@ export { InviteModal } from "./InviteModal";
 export { AcceptInvitePage } from "./AcceptInvitePage";
 export { ForgotPasswordPage } from "./ForgotPasswordPage";
 export { ResetPasswordPage } from "./ResetPasswordPage";
+export { ChangePasswordDialog } from "./ChangePasswordDialog";

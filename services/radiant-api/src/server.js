@@ -2694,6 +2694,55 @@ const server = http.createServer((req, res) => {
       }
       return authRoutes.me(req, res, corsHeaders, auth.user);
     }
+
+    if (path === `/${apiVersion}/admin/auth/change-password` && req.method === "POST") {
+      const auth = await authMiddleware(req, pool);
+      if (!auth.authenticated) {
+        return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+      }
+      return authRoutes.changePassword(req, res, corsHeaders, auth.user);
+    }
+
+    if (path === `/${apiVersion}/admin/auth/link-dj` && req.method === "POST") {
+      const auth = await authMiddleware(req, pool);
+      if (!auth.authenticated) {
+        return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+      }
+      return authRoutes.linkDj(req, res, corsHeaders, auth.user);
+    }
+  }
+
+  // User management routes (admin only) - outside auth block
+  if (path === `/${apiVersion}/admin/users` && req.method === "GET") {
+    await initAuthRoutes();
+    const auth = await authMiddleware(req, pool);
+    if (!auth.authenticated) {
+      return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+    }
+    return authRoutes.listUsers(req, res, corsHeaders, auth.user);
+  }
+
+  if (path.startsWith(`/${apiVersion}/admin/users/`)) {
+    await initAuthRoutes();
+    const auth = await authMiddleware(req, pool);
+    if (!auth.authenticated) {
+      return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+    }
+
+    // DELETE /v1/admin/users/:id
+    if (req.method === "DELETE") {
+      return authRoutes.deleteUser(req, res, corsHeaders, auth.user);
+    }
+
+    // PATCH /v1/admin/users/:id
+    if (req.method === "PATCH") {
+      return authRoutes.updateUser(req, res, corsHeaders, auth.user);
+    }
+
+    // POST /v1/admin/users/:id/reset-password
+    if (path.endsWith('/reset-password') && req.method === "POST") {
+      return authRoutes.adminResetPassword(req, res, corsHeaders, auth.user);
+    }
   }
 
   if (path.startsWith(`/${apiVersion}/admin/`)) {

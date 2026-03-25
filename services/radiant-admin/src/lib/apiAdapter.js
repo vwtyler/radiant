@@ -39,12 +39,31 @@ function resolveApiBaseUrl() {
 const API_BASE_URL = resolveApiBaseUrl();
 const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || "";
 
+function getAuthToken() {
+  // Try JWT token first (new auth system)
+  if (typeof window !== "undefined") {
+    const jwtToken = localStorage.getItem("accessToken");
+    if (jwtToken) return { type: "Bearer", token: jwtToken };
+  }
+  // Fall back to legacy admin token
+  if (ADMIN_TOKEN) return { type: "Legacy", token: ADMIN_TOKEN };
+  return null;
+}
+
 async function request(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-  if (ADMIN_TOKEN) headers["X-RADIANT-ADMIN-TOKEN"] = ADMIN_TOKEN;
+
+  const auth = getAuthToken();
+  if (auth) {
+    if (auth.type === "Bearer") {
+      headers["Authorization"] = `Bearer ${auth.token}`;
+    } else {
+      headers["X-RADIANT-ADMIN-TOKEN"] = auth.token;
+    }
+  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,

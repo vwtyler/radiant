@@ -3,7 +3,9 @@ import { geoGraticule10, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import countries110m from "world-atlas/countries-110m.json";
 import { apiAdapter } from "./lib/apiAdapter";
-import { AuthProvider, useAuth, LoginPage, UserMenu, AcceptInvitePage, ForgotPasswordPage, ResetPasswordPage } from "./auth";
+import { AuthProvider, useAuth, LoginPage, UserMenu, AcceptInvitePage, ForgotPasswordPage, ResetPasswordPage, ChangePasswordDialog } from "./auth";
+import { UsersTab } from "./pages/UsersTab";
+import { UserProfileTab } from "./pages/UserProfileTab";
 
 const DAYS = [
   { num: 7, label: "Sun" },
@@ -2594,6 +2596,101 @@ function AdminApp() {
     setDismissToast("Staged changes discarded");
   }
 
+  function PageMenu({ activeTab, setActiveTab }) {
+    const [pageMenuOpen, setPageMenuOpen] = useState(false);
+    const { user, logout, hasRole } = useAuth();
+
+    const menuItems = [
+      { key: "schedule", label: "Schedule" },
+      { key: "shows", label: "Shows" },
+      { key: "reports", label: "Reporting" },
+      { key: "stats", label: "Stats" },
+      { key: "settings", label: "Settings" },
+    ];
+
+    if (hasRole("admin")) {
+      menuItems.push({ key: "users", label: "Users" });
+    }
+
+    function getRoleLabel(role) {
+      switch (role) {
+        case "super_admin": return "Super Admin";
+        case "admin": return "Admin";
+        case "dj": return "DJ";
+        default: return role;
+      }
+    }
+
+    return (
+      <div className="page-menu">
+        <button
+          className="ghost page-menu-trigger"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={pageMenuOpen}
+          aria-label="Open page menu"
+          onClick={() => setPageMenuOpen((value) => !value)}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        {pageMenuOpen ? (
+          <>
+            <div 
+              className="page-menu-overlay"
+              onClick={() => setPageMenuOpen(false)}
+            />
+            <div className="page-menu-popover" role="menu">
+              {user && (
+                <button
+                  type="button"
+                  className="page-menu-user-info"
+                  onClick={() => {
+                    setActiveTab("profile");
+                    setPageMenuOpen(false);
+                  }}
+                >
+                  <div className="user-email">{user.email}</div>
+                  <div className="user-role">{getRoleLabel(user.role)}</div>
+                </button>
+              )}
+              
+              <div className="page-menu-divider" />
+              
+              {menuItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={activeTab === item.key ? "active" : ""}
+                  role="menuitem"
+                  onClick={() => {
+                    setActiveTab(item.key);
+                    setPageMenuOpen(false);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+              
+              <div className="page-menu-divider" />
+              
+              <button
+                type="button"
+                className="page-menu-logout"
+                role="menuitem"
+                onClick={() => {
+                  logout();
+                  setPageMenuOpen(false);
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={touchSafeMode ? "page-shell touch-safe" : "page-shell"}>
       <header className="topbar">
@@ -2613,42 +2710,10 @@ function AdminApp() {
           </p>
         </div>
         <div className="topbar-actions">
-          <div className="page-menu">
-            <button
-              className="ghost page-menu-trigger"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={pageMenuOpen}
-              aria-label="Open page menu"
-              onClick={() => setPageMenuOpen((value) => !value)}
-            >
-              <span aria-hidden="true">☰</span>
-            </button>
-            {pageMenuOpen ? (
-              <div className="page-menu-popover" role="menu">
-                {[
-                  { key: "schedule", label: "Schedule" },
-                  { key: "shows", label: "Shows" },
-                  { key: "reports", label: "Reporting" },
-                  { key: "stats", label: "Stats" },
-                  { key: "settings", label: "Settings" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={activeTab === item.key ? "active" : ""}
-                    role="menuitem"
-                    onClick={() => {
-                      setActiveTab(item.key);
-                      setPageMenuOpen(false);
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <PageMenu 
+            activeTab={activeTab} 
+            setActiveTab={setActiveTab}
+          />
 
           <div className={activeTab === "schedule" ? "control-row" : "control-row is-hidden"}>
           </div>
@@ -2661,7 +2726,6 @@ function AdminApp() {
         {info ? <span className="status-good">{info}</span> : null}
         {error ? <span className="status-bad">{error}</span> : null}
       </section>
-      <UserMenu />
 
       {activeTab === "schedule" && pendingCount > 0 ? (
         <div className="staged-fab" role="region" aria-label="Staged schedule changes">
@@ -2930,6 +2994,10 @@ function AdminApp() {
         <ReportingTab />
       ) : activeTab === "stats" ? (
         <StatsTab />
+      ) : activeTab === "users" ? (
+        <UsersTab />
+      ) : activeTab === "profile" ? (
+        <UserProfileTab />
       ) : (
         <SettingsTab onSiteTitlesChange={handleSiteTitlesChange} />
       )}

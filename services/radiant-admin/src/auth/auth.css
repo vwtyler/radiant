@@ -251,3 +251,251 @@
 .auth-links a:hover {
   text-decoration: underline;
 }
+
+/* Page Menu with User Info */
+.page-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+
+button.page-menu-user-info {
+  display: block;
+  width: 100%;
+  padding: 1rem;
+  background: #f8f9fa;
+  border: none;
+  border-bottom: 1px solid #e9ecef;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button.page-menu-user-info:hover {
+  background: #e9ecef;
+}
+
+.page-menu-user-info .user-email {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #333;
+  margin-bottom: 0.25rem;
+}
+
+.page-menu-user-info .user-role {
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.page-menu-divider {
+  height: 1px;
+  background: #e9ecef;
+  margin: 0.5rem 0;
+}
+
+.page-menu-logout {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #dc3545;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.page-menu-logout:hover {
+  background: #fee;
+}
+
+/* User Profile Page */
+.user-profile-shell {
+  padding: 1rem;
+  max-width: 800px;
+}
+
+.user-profile-shell h2 {
+  margin: 0 0 0.5rem 0;
+}
+
+.profile-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.profile-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.profile-card h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-row label {
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.profile-actions {
+  margin-top: 1rem;
+}
+
+.role-super_admin {
+  background: #dc3545;
+  color: white;
+}
+
+.role-admin {
+  background: #fd7e14;
+  color: white;
+}
+
+.role-dj {
+  background: #6c757d;
+  color: white;
+}
+
+/* Users Tab */
+.users-shell {
+  padding: 1rem;
+}
+
+.users-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.users-header h2 {
+  margin: 0;
+}
+
+.users-table-container {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.users-table th,
+.users-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.users-table th {
+  font-weight: 600;
+  color: #555;
+  background: #f8f9fa;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.role-super-admin {
+  background: #dc3545;
+  color: white;
+}
+
+.role-admin {
+  background: #fd7e14;
+  color: white;
+}
+
+.role-dj {
+  background: #6c757d;
+  color: white;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-inactive {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.user-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+button.danger {
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button.danger:hover {
+  background: #c82333;
+}
+
+/* Account Settings */
+.account-settings-card {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #e9ecef;
+}
+
+.account-action {
+  padding: 1rem 0;
+}
