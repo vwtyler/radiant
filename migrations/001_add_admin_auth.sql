@@ -65,18 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_app_admin_invitations_token ON app_admin_invitati
 CREATE INDEX IF NOT EXISTS idx_app_admin_invitations_email ON app_admin_invitations(email);
 CREATE INDEX IF NOT EXISTS idx_app_password_resets_token ON app_password_resets(token);
 
--- Create initial invitation for super admin
--- This will be sent immediately after migration
-INSERT INTO app_admin_invitations (email, token, role, invited_by, expires_at)
-SELECT 
-    'vwtyler@gmail.com',
-    encode(digest(random()::text || clock_timestamp()::text, 'sha256'), 'hex'),
-    'super_admin',
-    NULL,
-    NOW() + INTERVAL '7 days'
-WHERE NOT EXISTS (
-    SELECT 1 FROM app_admin_invitations WHERE email = 'vwtyler@gmail.com' AND accepted_at IS NULL
-);
+-- Note: Initial admin invitation is created by running:
+--   scripts/create-initial-admin.sh
+-- This uses the INITIAL_ADMIN_EMAIL environment variable
 
 -- Add comment explaining the tables
 COMMENT ON TABLE app_admin_users IS 'Admin panel users with role-based access control';

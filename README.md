@@ -24,6 +24,7 @@ Radiant is a self-hosted **radi**o operations **a**ge**nt** platform for schedul
    ```bash
    cp .env.example .env
    # Edit .env with your settings (see Environment Variables below)
+   # IMPORTANT: Set INITIAL_ADMIN_EMAIL to your email address
    ```
 
 2. **Start infrastructure:**
@@ -37,17 +38,26 @@ Radiant is a self-hosted **radi**o operations **a**ge**nt** platform for schedul
    docker exec -i radiant-postgres psql -U radiant -d radiant < migrations/001_add_admin_auth.sql
    ```
 
-4. **Start services:**
+4. **Create initial admin user:**
+   ```bash
+   # Make sure INITIAL_ADMIN_EMAIL is set in your .env
+   source .env
+   ./scripts/create-initial-admin.sh
+   ```
+   This creates an invitation email. Check your email or query the database for the token.
+
+5. **Start services:**
    ```bash
    docker compose up -d radiant-api radiant-admin
    ```
 
-5. **Create initial admin user:**
-   - The migration creates an invitation for `vwtyler@gmail.com`
-   - Visit `/accept-invite?token=<token>` to set password
-   - Or use the API directly to create a user
-
 6. **Access the app:**
+   - Get your invitation token:
+     ```bash
+     docker exec radiant-postgres psql -U radiant -d radiant -c "SELECT token FROM app_admin_invitations WHERE email = '\${INITIAL_ADMIN_EMAIL}' ORDER BY created_at DESC LIMIT 1;"
+     ```
+   - Visit: `${ADMIN_PUBLIC_URL}/accept-invite?token=<YOUR_TOKEN>`
+   - Set your password and you're ready to go!
    - Admin: http://localhost:5173
    - API: http://localhost:3000
    - Directus: http://localhost:1337
@@ -57,6 +67,8 @@ Radiant is a self-hosted **radi**o operations **a**ge**nt** platform for schedul
 ### Required
 - `DATABASE_URL` - PostgreSQL connection string
 - `JWT_SECRET` - Secret for JWT signing (generate: `openssl rand -hex 32`)
+- `INITIAL_ADMIN_EMAIL` - Email address for the first super admin (invitation sent on setup)
+- `ADMIN_PUBLIC_URL` - Public URL of admin panel (e.g., `https://admin.example.com`)
 - `MAILGUN_DOMAIN` - Your Mailgun domain (e.g., `mg.example.com`)
 - `MAILGUN_API_KEY` - Mailgun API key
 - `MAILGUN_FROM` - Sender email address

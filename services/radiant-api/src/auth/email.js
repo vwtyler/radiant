@@ -1,9 +1,10 @@
 const https = require('https');
 const querystring = require('querystring');
 
-const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || 'mg.kaad-lp.org';
-const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY || process.env.SMTP_PASSWORD;
-const MAILGUN_FROM = process.env.MAILGUN_FROM || process.env.SMTP_FROM || 'noreply@kaad-lp.org';
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN;
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY;
+const MAILGUN_FROM = process.env.MAILGUN_FROM || 'noreply@kaad-lp.org';
+const ADMIN_PUBLIC_URL = process.env.ADMIN_PUBLIC_URL || 'http://localhost:5173';
 
 function sendMailgunEmail({ to, subject, text, html }) {
   return new Promise((resolve, reject) => {
@@ -60,7 +61,7 @@ function sendMailgunEmail({ to, subject, text, html }) {
 
 async function sendInvitationEmail({ to, token, role, invitedBy }) {
   const roleDisplay = role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-  const acceptUrl = `https://admin.kaad-lp.org/accept-invite?token=${token}`;
+  const acceptUrl = `${ADMIN_PUBLIC_URL}/accept-invite?token=${token}`;
 
   const text = `Hello,
 
@@ -120,7 +121,7 @@ KAAD-LP Team`;
 }
 
 async function sendPasswordResetEmail({ to, token }) {
-  const resetUrl = `https://admin.kaad-lp.org/reset-password?token=${token}`;
+  const resetUrl = `${ADMIN_PUBLIC_URL}/reset-password?token=${token}`;
 
   const text = `Hello,
 
@@ -187,7 +188,7 @@ async function sendWelcomeEmail({ to, role }) {
 Your KAAD-LP admin account has been successfully set up as a ${roleDisplay}.
 
 You can now log in at:
-https://admin.kaad-lp.org
+${ADMIN_PUBLIC_URL}
 
 Best regards,
 KAAD-LP Team`;
@@ -203,7 +204,7 @@ KAAD-LP Team`;
     <p>Your KAAD-LP admin account has been successfully set up as a <strong>${roleDisplay}</strong>.</p>
     
     <div style="margin: 30px 0;">
-      <a href="https://admin.kaad-lp.org" 
+      <a href="${ADMIN_PUBLIC_URL}" 
          style="background-color: #2c4f73; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
         Log In Now
       </a>
