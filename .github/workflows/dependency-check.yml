@@ -1,0 +1,43 @@
+name: Validate Node and dependency upgrades
+
+on:
+  pull_request:
+    paths:
+      - "services/radiant-admin/**"
+      - "services/radiant-api/**"
+      - ".github/workflows/dependency-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [radiant-admin, radiant-api]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install npm 12
+        run: npm install --global npm@12
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm install --no-audit --no-fund
+      - name: Audit installed dependency graph
+        working-directory: services/${{ matrix.service }}
+        run: npm audit --audit-level=moderate
+      - name: Build admin interface
+        if: matrix.service == 'radiant-admin'
+        working-directory: services/radiant-admin
+        run: npm run build
+      - name: Check API syntax
+        if: matrix.service == 'radiant-api'
+        working-directory: services/radiant-api
+        run: node --check src/server.js
+      - name: Build Docker image
+        run: docker build --tag radiant-${{ matrix.service }}:validation services/${{ matrix.service }}
