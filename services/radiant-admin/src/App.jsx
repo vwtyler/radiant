@@ -1927,11 +1927,124 @@ function SettingsTab({ onSiteTitlesChange }) {
   );
 }
 
-function ShowsTab({ shows, onOpenShow }) {
+function AddShowDialog({ open, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    title: "",
+    slug: "",
+    show_type: "music",
+    description: "",
+    is_active: true,
+  });
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setForm({ title: "", slug: "", show_type: "music", description: "", is_active: true });
+    setSlugEdited(false);
+    setError("");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onKeyDown(event) {
+      if (event.key === "Escape" && !saving) onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, saving, onClose]);
+
+  if (!open) return null;
+
+  function slugify(value) {
+    return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        ...form,
+        title: form.title.trim(),
+        slug: form.slug.trim(),
+        description: form.description.trim(),
+      };
+      await apiAdapter.createAdminShow(payload);
+      await onCreated();
+      onClose();
+    } catch (createError) {
+      setError(createError.message || "Failed to create show.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !saving) onClose();
+    }}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="add-show-heading">
+        <h2 id="add-show-heading">Add Show</h2>
+        <form className="show-edit-form" onSubmit={handleSubmit}>
+          <label>
+            Title
+            <input type="text" autoFocus required maxLength={255} value={form.title}
+              onChange={(event) => {
+                const title = event.target.value;
+                setForm((prev) => ({ ...prev, title, slug: slugEdited ? prev.slug : slugify(title) }));
+              }} />
+          </label>
+          <label>
+            Slug
+            <input type="text" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" title="Use lowercase letters, numbers, and hyphens"
+              value={form.slug}
+              onChange={(event) => {
+                setSlugEdited(true);
+                setForm((prev) => ({ ...prev, slug: event.target.value }));
+              }} />
+          </label>
+          <label>
+            Show Type
+            <select value={form.show_type} onChange={(event) => setForm((prev) => ({ ...prev, show_type: event.target.value }))}>
+              <option value="music">Music</option>
+              <option value="talk">Talk</option>
+              <option value="mixed">Mixed</option>
+              <option value="special">Special</option>
+            </select>
+          </label>
+          <label>
+            Description
+            <textarea rows={4} value={form.description}
+              onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))} />
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={form.is_active}
+              onChange={(event) => setForm((prev) => ({ ...prev, is_active: event.target.checked }))} />
+            Active show
+          </label>
+          {error ? <p className="status-bad" role="alert">{error}</p> : null}
+          <div className="modal-actions inline">
+            <button className="ghost" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+            <button className="primary" type="submit" disabled={saving || !form.title.trim() || !form.slug.trim()}>
+              {saving ? "Creating..." : "Create Show"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ShowsTab({ shows, onOpenShow, onCreated }) {
   const [searchText, setSearchText] = useState("");
   const [showTypeFilter, setShowTypeFilter] = useState("all");
   const [djFilter, setDjFilter] = useState("all");
   const [activeFilter, setActiveFilter] = useState("all");
+  const [addShowOpen, setAddShowOpen] = useState(false);
 
   const activeFilterCount =
     (searchText.trim() ? 1 : 0) +
@@ -2038,6 +2151,7 @@ function ShowsTab({ shows, onOpenShow }) {
         </div>
 
         <div className="shows-toolbar-actions">
+          <button className="primary" type="button" onClick={() => setAddShowOpen(true)}>Add Show</button>
           <button className="ghost" type="button" onClick={resetFilters}>
             Reset Filters
           </button>
@@ -2094,6 +2208,7 @@ function ShowsTab({ shows, onOpenShow }) {
       </div>
 
       {!filteredShows.length ? <p className="shows-empty">No shows match the selected filters.</p> : null}
+      <AddShowDialog open={addShowOpen} onClose={() => setAddShowOpen(false)} onCreated={onCreated} />
     </section>
   );
 }
@@ -2989,7 +3104,10 @@ function AdminApp() {
           </section>
         </>
       ) : activeTab === "shows" ? (
-        <ShowsTab shows={shows} onOpenShow={setShowDetailsShowId} />
+        <ShowsTab shows={shows} onOpenShow={setShowDetailsShowId} onCreated={async () => {
+          const data = await apiAdapter.getAdminShows();
+          setShows(data.items || []);
+        }} />
       ) : activeTab === "reports" ? (
         <ReportingTab />
       ) : activeTab === "stats" ? (

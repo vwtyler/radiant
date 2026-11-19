@@ -92,6 +92,12 @@ export const apiAdapter = {
   getAdminShows() {
     return request("/v1/admin/shows", { method: "GET" });
   },
+  createAdminShow(payload) {
+    return request("/v1/admin/shows", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   getAdminShowInsights(showId) {
     return request(`/v1/admin/shows/${showId}/insights`, { method: "GET" });
   },

@@ -2757,6 +2757,24 @@ const server = http.createServer((req, res) => {
       return sendJson(res, 200, payload, corsHeaders);
     }
 
+    if (path === `/${apiVersion}/admin/shows` && req.method === "POST") {
+      const body = await readJsonBody(req);
+      let payload;
+      try {
+        payload = validateAdminShowPayload(body, {
+          title: "",
+          slug: "",
+          description: "",
+          show_type: "music",
+          is_active: true,
+        });
+      } catch (error) {
+        return sendJson(res, 400, { error: "invalid_payload", message: error.message }, corsHeaders);
+      }
+      const created = await directusCreateItem("shows", payload);
+      return sendJson(res, 201, { item: created }, corsHeaders);
+    }
+
     if (path === `/${apiVersion}/admin/reports/types` && req.method === "GET") {
       return sendJson(
         res,
