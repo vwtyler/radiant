@@ -255,6 +255,99 @@ async function createAuthRoutes(pool) {
       }
     },
 
+    // GET /v1/admin/auth/invitations - Unaccepted invitations (admin only).
+    async listInvitations(req, res, corsHeaders, currentUser) {
+      try {
+        if (!['super_admin', 'admin'].includes(currentUser.role)) {
+          return sendJson(res, 403, { error: 'Only admins can view invitations' }, corsHeaders);
+        }
+        const result = await query(
+          `SELECT DISTINCT ON (i.email)
+             i.id, i.email, i.role, i.dj_id, i.invited_by, i.created_at, i.expires_at
+           FROM app_admin_invitations i
+           WHERE i.accepted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM app_admin_users u WHERE u.email = i.email)
+           ORDER BY i.email, i.created_at DESC, i.id DESC`
+        );
+        return sendJson(res, 200, {
+          items: result.rows.map(row => ({
+            id: row.id,
+            email: row.email,
+            role: row.role,
+            djId: row.dj_id,
+            invitedBy: row.invited_by,
+            createdAt: row.created_at,
+            expiresAt: row.expires_at,
+            status: new Date(row.expires_at).getTime() > Date.now() ? 'pending' : 'expired'
+          }))
+        }, corsHeaders);
+      } catch (error) {
+        console.error('List invitations error:', error);
+        return sendJson(res, 500, { error: 'Failed to list invitations' }, corsHeaders);
+      }
+    },
+
+    // POST /v1/admin/auth/invitations/:id/resend - Rotate invitation token and resend.
+    async resendInvitation(req, res, corsHeaders, currentUser) {
+      try {
+        if (!['super_admin', 'admin'].includes(currentUser.role)) {
+          return sendJson(res, 403, { error: 'Only admins can resend invitations' }, corsHeaders);
+        }
+        const match = new URL(req.url, 'http://localhost').pathname.match(/\/invitations\/(\d+)\/resend$/);
+        const id = match ? Number(match[1]) : 0;
+        if (!Number.isSafeInteger(id) || id <= 0) {
+          return sendJson(res, 400, { error: 'Invalid invitation ID' }, corsHeaders);
+        }
+
+        const existing = await query(
+          `SELECT i.id, i.email, i.role, i.accepted_at
+           FROM app_admin_invitations i WHERE i.id = $1`, [id]
+        );
+        const invitation = existing.rows[0];
+        if (!invitation || invitation.accepted_at) {
+          return sendJson(res, 404, { error: 'Invitation not found or already accepted' }, corsHeaders);
+        }
+        const user = await query('SELECT id FROM app_admin_users WHERE email = $1', [invitation.email]);
+        if (user.rows.length) {
+          return sendJson(res, 409, { error: 'User already exists' }, corsHeaders);
+        }
+
+        const token = generateToken();
+        const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+        // Rotate the token; previous invitation links stop working immediately.
+        const rotated = await query(
+          `UPDATE app_admin_invitations
+           SET token = $1, expires_at = $2, created_at = NOW(), invited_by = $3
+           WHERE id = $4 AND accepted_at IS NULL RETURNING id`,
+          [token, expiresAt, currentUser.userId, id]
+        );
+        if (!rotated.rows.length) {
+          return sendJson(res, 409, { error: 'Invitation is no longer pending' }, corsHeaders);
+        }
+        // Expire other unaccepted invitations for this address to avoid parallel valid links.
+        await query(
+          `UPDATE app_admin_invitations SET expires_at = NOW()
+           WHERE email = $1 AND id <> $2 AND accepted_at IS NULL AND expires_at > NOW()`,
+          [invitation.email, id]
+        );
+        const result = await sendInvitationEmail({
+          to: invitation.email, token, role: invitation.role, invitedBy: currentUser.email
+        });
+        if (!result.success || result.mock) {
+          return sendJson(res, 502, {
+            error: result.mock ? 'Email provider is not configured' : 'Invitation email could not be sent',
+            message: 'The invitation was refreshed, but email delivery was not confirmed. Try resending after fixing email delivery.'
+          }, corsHeaders);
+        }
+        return sendJson(res, 200, {
+          message: 'Invitation resent', email: invitation.email, expiresAt: expiresAt.toISOString()
+        }, corsHeaders);
+      } catch (error) {
+        console.error('Resend invitation error:', error);
+        return sendJson(res, 500, { error: 'Failed to resend invitation' }, corsHeaders);
+      }
+    },
+
     // POST /v1/admin/auth/accept
     async accept(req, res, corsHeaders) {
       try {
