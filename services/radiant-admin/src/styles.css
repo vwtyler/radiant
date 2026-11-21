@@ -1576,6 +1576,8 @@ textarea {
   }
 
   .topbar-actions {
+    /* Keep the mobile menu anchored to .topbar, not this content-height wrapper. */
+    position: static;
     width: 100%;
     justify-items: start;
     margin-top: 0.35rem;
