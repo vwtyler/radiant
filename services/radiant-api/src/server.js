@@ -2681,7 +2681,7 @@ const server = http.createServer((req, res) => {
       return authRoutes.listInvitations(req, res, corsHeaders, auth.user);
     }
 
-    if (/^\\/v1\\/admin\\/auth\\/invitations\\/\\d+\\/resend$/.test(path) && req.method === "POST") {
+    if (/^\/v1\/admin\/auth\/invitations\/\d+\/resend$/.test(path) && req.method === "POST") {
       const auth = await authMiddleware(req, pool);
       if (!auth.authenticated) return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
       return authRoutes.resendInvitation(req, res, corsHeaders, auth.user);
