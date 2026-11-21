@@ -292,7 +292,7 @@ async function createAuthRoutes(pool) {
         if (!['super_admin', 'admin'].includes(currentUser.role)) {
           return sendJson(res, 403, { error: 'Only admins can resend invitations' }, corsHeaders);
         }
-        const match = new URL(req.url, 'http://localhost').pathname.match(/\\/invitations\\/(\\d+)\\/resend$/);
+        const match = new URL(req.url, 'http://localhost').pathname.match(/\/invitations\/(\d+)\/resend$/);
         const id = match ? Number(match[1]) : 0;
         if (!Number.isSafeInteger(id) || id <= 0) {
           return sendJson(res, 400, { error: 'Invalid invitation ID' }, corsHeaders);
