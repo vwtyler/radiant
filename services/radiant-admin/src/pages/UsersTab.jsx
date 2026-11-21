@@ -4,6 +4,9 @@ import { InviteModal } from "../auth/InviteModal";
 
 export function UsersTab() {
   const [users, setUsers] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [resendingId, setResendingId] = useState(null);
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -22,14 +25,41 @@ export function UsersTab() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch("/v1/admin/users");
-      if (!response.ok) throw new Error("Failed to load users");
-      const data = await response.json();
-      setUsers(data.items || []);
+      const [usersResponse, invitesResponse] = await Promise.all([
+        apiFetch("/v1/admin/users"),
+        apiFetch("/v1/admin/auth/invitations")
+      ]);
+      if (!usersResponse.ok) throw new Error("Failed to load users");
+      if (!invitesResponse.ok) throw new Error("Failed to load invitations");
+      const [usersData, invitesData] = await Promise.all([
+        usersResponse.json(), invitesResponse.json()
+      ]);
+      setUsers(usersData.items || []);
+      setInvitations(invitesData.items || []);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResendInvitation(invitation) {
+    if (!window.confirm(`Send a new invitation to ${invitation.email}? The previous link will stop working.`)) return;
+    setResendingId(invitation.id);
+    setNotice("");
+    setError(null);
+    try {
+      const response = await apiFetch(`/v1/admin/auth/invitations/${invitation.id}/resend`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || "Failed to resend invitation");
+      setNotice(`Invitation resent to ${invitation.email}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResendingId(null);
     }
   }
 
@@ -110,7 +140,8 @@ export function UsersTab() {
       </div>
 
       {loading && <p>Loading users...</p>}
-      {error && <p className="status-bad">{error}</p>}
+      {error && <p className="status-bad" role="alert">{error}</p>}
+      {notice && <p className="status-good" role="status">{notice}</p>}
 
       {!loading && !error && (
         <div className="users-table-container">
@@ -173,6 +204,46 @@ export function UsersTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="users-table-container">
+          <h3>Invitations ({invitations.length})</h3>
+          {invitations.length ? (
+            <table className="users-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Invited</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invitations.map((invite) => {
+                  const expired = new Date(invite.expiresAt).getTime() <= Date.now();
+                  return (
+                    <tr key={invite.id}>
+                      <td>{invite.email}</td>
+                      <td><span className={`role-badge ${getRoleBadgeClass(invite.role)}`}>{formatRole(invite.role)}</span></td>
+                      <td><span className={`status-badge status-${expired ? "inactive" : "pending"}`}>{expired ? "Expired" : "Pending"}</span></td>
+                      <td>{new Date(invite.createdAt).toLocaleString()}</td>
+                      <td>{new Date(invite.expiresAt).toLocaleString()}</td>
+                      <td>
+                        <button type="button" className="ghost small" disabled={resendingId !== null}
+                          onClick={() => handleResendInvitation(invite)}>
+                          {resendingId === invite.id ? "Sending..." : "Resend Invite"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : <p className="subhead">No pending or expired invitations.</p>}
         </div>
       )}
 
