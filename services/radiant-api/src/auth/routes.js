@@ -262,11 +262,12 @@ async function createAuthRoutes(pool) {
           return sendJson(res, 403, { error: 'Only admins can view invitations' }, corsHeaders);
         }
         const result = await query(
-          `SELECT i.id, i.email, i.role, i.dj_id, i.invited_by, i.created_at, i.expires_at
+          `SELECT DISTINCT ON (i.email)
+             i.id, i.email, i.role, i.dj_id, i.invited_by, i.created_at, i.expires_at
            FROM app_admin_invitations i
            WHERE i.accepted_at IS NULL
              AND NOT EXISTS (SELECT 1 FROM app_admin_users u WHERE u.email = i.email)
-           ORDER BY i.created_at DESC`
+           ORDER BY i.email, i.created_at DESC, i.id DESC`
         );
         return sendJson(res, 200, {
           items: result.rows.map(row => ({
@@ -323,6 +324,12 @@ async function createAuthRoutes(pool) {
         if (!rotated.rows.length) {
           return sendJson(res, 409, { error: 'Invitation is no longer pending' }, corsHeaders);
         }
+        // Expire other unaccepted invitations for this address to avoid parallel valid links.
+        await query(
+          `UPDATE app_admin_invitations SET expires_at = NOW()
+           WHERE email = $1 AND id <> $2 AND accepted_at IS NULL AND expires_at > NOW()`,
+          [invitation.email, id]
+        );
         const result = await sendInvitationEmail({
           to: invitation.email, token, role: invitation.role, invitedBy: currentUser.email
         });
