@@ -2821,7 +2821,13 @@ function AdminApp() {
                   ? "Generate and download reporting exports for station operations."
                   : activeTab === "stats"
                     ? "Live listener counts, uptime, and geo visibility from Icecast data."
-                  : "Configure branding and stream integration for metadata updates and listener stats."}
+                  : activeTab === "users"
+                    ? "Manage station users, roles, and pending invitations."
+                  : activeTab === "profile"
+                    ? "View and update your account information."
+                  : activeTab === "settings"
+                    ? "Configure branding and stream integration for metadata updates and listener stats."
+                  : ""}
           </p>
         </div>
         <div className="topbar-actions">
