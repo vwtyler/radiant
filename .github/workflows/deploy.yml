@@ -4,16 +4,69 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: radiant-vps-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VPS
+      - name: Build before switching running containers
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 20m
+          script_stop: true
           script: |
-            ~/radiant/scripts/deploy.sh
+            set -eu
+            cd "$HOME/radiant"
+
+            echo "Updating checkout (fast-forward only)..."
+            git pull --ff-only origin main
+
+            # Build both images while existing services continue serving requests.
+            # This preserves the VPS-specific docker-compose.override.yml.
+            echo "Building replacement application images..."
+            docker compose build radiant-api radiant-admin
+
+            echo "Recreating application containers only..."
+            # Recreate the API first; leave PostgreSQL and Directus untouched.
+            docker compose up -d --no-deps radiant-api
+            docker compose up -d --no-deps radiant-admin
+
+            echo "Checking service health..."
+            check_health() {
+              label="$1"
+              url="$2"
+              attempt=1
+              while [ "$attempt" -le 30 ]; do
+                if curl --fail --silent --show-error --max-time 3 --output /dev/null "$url"; then
+                  echo "$label: healthy"
+                  return 0
+                fi
+                sleep 2
+                attempt=$((attempt + 1))
+              done
+              echo "$label: FAILED health check"
+              return 1
+            }
+
+            if ! check_health "Radiant API" "http://127.0.0.1:13000/healthz"; then
+              docker compose logs --tail=50 radiant-api
+              exit 1
+            fi
+            if ! check_health "Radiant Admin" "http://127.0.0.1:15173/"; then
+              docker compose logs --tail=50 radiant-admin
+              exit 1
+            fi
+
+            docker compose ps
+            echo "Deployment successful."
