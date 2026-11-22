@@ -1,0 +1,45 @@
+name: Export encrypted VPS connection values (temporary)
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - ".github/workflows/temporary-export-vps-connection.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'setup/secure-vps-connection-transfer'
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+    steps:
+      - name: Encrypt and display ciphertext only
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          cat > "$RUNNER_TEMP/transfer-public.pem" <<'PUBLIC_KEY'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnPbrUupJQZQ5j4hQ2Q+o
+          06mr56VfwymVfLirPmIs9zzhAK46b7UZ5s/s6vjrVAYY3uIAA7Vqt0YZ4pnI/84I
+          /+VHHjVYDNXvhO8cNIwBCmGQo08WB7m7pjN8QEckHqwQZ3QCEDRiMkz4KcQaVBPC
+          vAXHqtJfxDF0L+plvuyoueMaTSQUev2uQMfQ0ezMk1aBeF697np9Zf/EgVLhS/NO
+          lI2eS8X7ZdMzZ2iUukV5M5CF3gn6XHeWIY4yj0rMmzaFs6uTmni4Ys2R5TBonJjA
+          UcJm2McVarNiAAkAd0ielBivM7hpOhpm4AzlNz11r3tqAukdCb5KJLvz0leyiqAd
+          YgY7wvm3ZWStDKSeU9tUs6UmdmqkHmEUIE8qtTpM/FS5Om9xaEBqSOzEvezHSg6I
+          DHk9Vgmdw6pkLsiiVIcQp6Cm/HcrSIRX9AT8DBpfE/ON3/eS3aAB5qVoXIsS6K54
+          9WtrC97I6PtNzhwIv79GKZqh3nTKxqa6Bqn4ujnqkcEbAgMBAAE=
+          -----END PUBLIC KEY-----
+          PUBLIC_KEY
+          encrypt_value() {
+            printf '%s' "$1" | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/transfer-public.pem" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64 -w0
+          }
+          printf 'ENCRYPTED_VPS_HOST=%s\n' "$(encrypt_value "$VPS_HOST")"
+          printf 'ENCRYPTED_VPS_USER=%s\n' "$(encrypt_value "$VPS_USER")"
+          echo 'Only RSA-OAEP ciphertext was printed.'
