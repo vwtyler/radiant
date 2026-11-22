@@ -43,3 +43,5 @@ jobs:
           printf 'ENCRYPTED_VPS_HOST=%s\n' "$(encrypt_value "$VPS_HOST")"
           printf 'ENCRYPTED_VPS_USER=%s\n' "$(encrypt_value "$VPS_USER")"
           echo 'Only RSA-OAEP ciphertext was printed.'
+
+# Ephemeral ciphertext only; never merge this temporary workflow.
