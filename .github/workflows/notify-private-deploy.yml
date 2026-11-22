@@ -1,0 +1,33 @@
+name: Notify private Radiant deployment
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify private deployment repository
+        env:
+          DISPATCH_TOKEN: ${{ secrets.RADIANT_DEPLOY_DISPATCH_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::error::RADIANT_DEPLOY_DISPATCH_TOKEN is not configured."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --retry 3 \
+            --request POST \
+            --url https://api.github.com/repos/vwtyler/radiant-deploy/dispatches \
+            --header "Authorization: Bearer $DISPATCH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "{\"event_type\":\"radiant-main-updated\",\"client_payload\":{\"sha\":\"$COMMIT_SHA\"}}"
+          echo "Private deployment notified for $COMMIT_SHA."
