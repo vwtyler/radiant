@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 
 const AuthContext = createContext(null);
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE_URL = (window.__RADIANT_CONFIG__?.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL) || "";
 
 function getApiBase() {
   if (API_BASE_URL && !API_BASE_URL.includes("localhost")) {
