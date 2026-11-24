@@ -63,6 +63,24 @@ export function UsersTab() {
     }
   }
 
+  async function handleDeleteInvitation(invite) {
+    if (!window.confirm(`Delete the invitation for ${invite.email}? All outstanding invitation links for this address will stop working.`)) return;
+    setResendingId(invite.id);
+    setError(null);
+    setNotice("");
+    try {
+      const response = await apiFetch(`/v1/admin/auth/invitations/${invite.id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to delete invitation");
+      setNotice(`Invitation deleted for ${invite.email}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResendingId(null);
+    }
+  }
+
   async function handleDeleteUser(userId) {
     if (!confirm("Are you sure you want to delete this user?")) return;
     
@@ -143,107 +161,53 @@ export function UsersTab() {
       {error && <p className="status-bad" role="alert">{error}</p>}
       {notice && <p className="status-good" role="status">{notice}</p>}
 
-      {!loading && !error && (
+      {!loading && (
         <div className="users-table-container">
           <table className="users-table">
             <thead>
               <tr>
                 <th>Email</th>
                 <th>Role</th>
-                <th>Status</th>
-                <th>Last Login</th>
+                <th>Last Activity</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.email}</td>
-                  <td>
-                    <span className={`role-badge ${getRoleBadgeClass(user.role)}`}>
-                      {formatRole(user.role)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`status-badge status-${user.status}`}>
-                      {user.status}
-                    </span>
-                  </td>
-                  <td>
-                    {user.lastLoginAt 
-                      ? new Date(user.lastLoginAt).toLocaleString()
-                      : "Never"
-                    }
-                  </td>
-                  <td>
-                    <div className="user-actions">
-                      <button 
-                        className="ghost small"
-                        onClick={() => setEditingUser(user)}
-                        title="Edit user"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        className="ghost small"
-                        onClick={() => setResetPasswordUser(user)}
-                        title="Reset password"
-                      >
-                        Reset PW
-                      </button>
-                      <button 
-                        className="danger small"
-                        onClick={() => handleDeleteUser(user.id)}
-                        title="Delete user"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
+              {users.map(user => (
+                <tr key={`user-${user.id}`}>
+                  <td><span className="user-email-status">{user.email}
+                    {user.status !== "active" && <span className={`status-badge status-${user.status}`}>{user.status}</span>}
+                  </span></td>
+                  <td><span className={`role-badge ${getRoleBadgeClass(user.role)}`}>{formatRole(user.role)}</span></td>
+                  <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</td>
+                  <td><div className="user-actions">
+                    <button className="ghost small" onClick={() => setEditingUser(user)}>Edit</button>
+                    <button className="ghost small" onClick={() => setResetPasswordUser(user)}>Reset PW</button>
+                    <button className="danger small" onClick={() => handleDeleteUser(user.id)}>Delete</button>
+                  </div></td>
                 </tr>
               ))}
+              {invitations.map(invite => {
+                const expired = new Date(invite.expiresAt).getTime() <= Date.now();
+                return (
+                  <tr key={`invite-${invite.id}`}>
+                    <td><span className="user-email-status">{invite.email}
+                      <span className={`status-badge status-${expired ? "inactive" : "pending"}`}>{expired ? "Expired" : "Pending"}</span>
+                    </span></td>
+                    <td><span className={`role-badge ${getRoleBadgeClass(invite.role)}`}>{formatRole(invite.role)}</span></td>
+                    <td>Invited {new Date(invite.createdAt).toLocaleDateString()}
+                      <div className="invite-expiry">{expired ? "Expired" : "Expires"} {new Date(invite.expiresAt).toLocaleDateString()}</div>
+                    </td>
+                    <td><div className="user-actions">
+                      <button type="button" className="ghost small" disabled={resendingId !== null} onClick={() => handleResendInvitation(invite)}>Resend Invite</button>
+                      <button type="button" className="danger small" disabled={resendingId !== null} onClick={() => handleDeleteInvitation(invite)}>Delete</button>
+                    </div></td>
+                  </tr>
+                );
+              })}
+              {!users.length && !invitations.length && <tr><td colSpan={4}>No users or invitations.</td></tr>}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {!loading && !error && (
-        <div className="users-table-container">
-          <h3>Invitations ({invitations.length})</h3>
-          {invitations.length ? (
-            <table className="users-table">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Invited</th>
-                  <th>Expires</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invitations.map((invite) => {
-                  const expired = new Date(invite.expiresAt).getTime() <= Date.now();
-                  return (
-                    <tr key={invite.id}>
-                      <td>{invite.email}</td>
-                      <td><span className={`role-badge ${getRoleBadgeClass(invite.role)}`}>{formatRole(invite.role)}</span></td>
-                      <td><span className={`status-badge status-${expired ? "inactive" : "pending"}`}>{expired ? "Expired" : "Pending"}</span></td>
-                      <td>{new Date(invite.createdAt).toLocaleString()}</td>
-                      <td>{new Date(invite.expiresAt).toLocaleString()}</td>
-                      <td>
-                        <button type="button" className="ghost small" disabled={resendingId !== null}
-                          onClick={() => handleResendInvitation(invite)}>
-                          {resendingId === invite.id ? "Sending..." : "Resend Invite"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : <p className="subhead">No pending or expired invitations.</p>}
         </div>
       )}
 
