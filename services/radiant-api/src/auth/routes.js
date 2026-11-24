@@ -348,6 +348,33 @@ async function createAuthRoutes(pool) {
       }
     },
 
+    // DELETE /v1/admin/auth/invitations/:id - Revoke all unaccepted links for this address.
+    async deleteInvitation(req, res, corsHeaders, currentUser) {
+      try {
+        if (!['super_admin', 'admin'].includes(currentUser.role)) {
+          return sendJson(res, 403, { error: 'Only admins can delete invitations' }, corsHeaders);
+        }
+        const match = new URL(req.url, 'http://localhost').pathname.match(/\/invitations\/(\d+)$/);
+        const id = match ? Number(match[1]) : 0;
+        if (!Number.isSafeInteger(id) || id <= 0) {
+          return sendJson(res, 400, { error: 'Invalid invitation ID' }, corsHeaders);
+        }
+        const result = await query(
+          `DELETE FROM app_admin_invitations
+           WHERE accepted_at IS NULL AND email = (
+             SELECT email FROM app_admin_invitations WHERE id = $1 AND accepted_at IS NULL
+           ) RETURNING id`, [id]
+        );
+        if (!result.rows.length) {
+          return sendJson(res, 404, { error: 'Invitation not found or already accepted' }, corsHeaders);
+        }
+        return sendJson(res, 200, { message: 'Invitation deleted' }, corsHeaders);
+      } catch (error) {
+        console.error('Delete invitation error:', error);
+        return sendJson(res, 500, { error: 'Failed to delete invitation' }, corsHeaders);
+      }
+    },
+
     // POST /v1/admin/auth/accept
     async accept(req, res, corsHeaders) {
       try {
