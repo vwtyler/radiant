@@ -1763,3 +1763,26 @@ textarea {
     display: none;
   }
 }
+
+/* Unified user and invitation list */
+.user-email-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.user-email-status .status-badge {
+  border-radius: 999px;
+}
+.user-email-status .status-pending {
+  background: #fff0ce;
+  color: #805500;
+}
+.invite-expiry {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  margin-top: 0.2rem;
+}
+.users-table .user-actions {
+  flex-wrap: wrap;
+}
