@@ -22,6 +22,8 @@ services:
     command: ["node", "src/server.js"]
 
   radiant-admin:
+    build:
+      target: development
     environment:
       NODE_ENV: development
     ports:
