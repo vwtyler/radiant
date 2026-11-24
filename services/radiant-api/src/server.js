@@ -2687,6 +2687,12 @@ const server = http.createServer((req, res) => {
       return authRoutes.resendInvitation(req, res, corsHeaders, auth.user);
     }
 
+    if (/^\/v1\/admin\/auth\/invitations\/\d+$/.test(path) && req.method === "DELETE") {
+      const auth = await authMiddleware(req, pool);
+      if (!auth.authenticated) return sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+      return authRoutes.deleteInvitation(req, res, corsHeaders, auth.user);
+    }
+
     if (path === `/${apiVersion}/admin/auth/accept` && req.method === "POST") {
       return authRoutes.accept(req, res, corsHeaders);
     }
