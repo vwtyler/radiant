@@ -1160,8 +1160,8 @@ function ReportingTab() {
   const [generating, setGenerating] = useState(false);
 
   async function requestReportsFallback(path, payload = null) {
-    const token = import.meta.env.VITE_ADMIN_TOKEN || "";
-    const configured = (import.meta.env.VITE_API_BASE_URL || "").trim();
+    const token = (window.__RADIANT_CONFIG__?.VITE_ADMIN_TOKEN ?? import.meta.env.VITE_ADMIN_TOKEN) || "";
+    const configured = ((window.__RADIANT_CONFIG__?.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL) || "").trim();
     const { protocol, hostname } = window.location;
     const inferredHost = hostname.includes("admin")
       ? hostname.replace("admin.", "api.").replace("-admin.", "-api.").replace("admin-", "api-")
@@ -1317,8 +1317,8 @@ function StatsTab({ mode = "admin" }) {
   const hasLoadedInitialStatsRef = useRef(false);
 
   async function requestStatsFallback(path) {
-    const token = import.meta.env.VITE_ADMIN_TOKEN || "";
-    const configured = (import.meta.env.VITE_API_BASE_URL || "").trim();
+    const token = (window.__RADIANT_CONFIG__?.VITE_ADMIN_TOKEN ?? import.meta.env.VITE_ADMIN_TOKEN) || "";
+    const configured = ((window.__RADIANT_CONFIG__?.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL) || "").trim();
     const { protocol, hostname } = window.location;
     const inferredHost = hostname.includes("admin")
       ? hostname.replace("admin.", "api.").replace("-admin.", "-api.").replace("admin-", "api-")

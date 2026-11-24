@@ -21,7 +21,7 @@ function inferApiFromWindowLocation() {
 }
 
 function resolveApiBaseUrl() {
-  const configured = (import.meta.env.VITE_API_BASE_URL || "").trim();
+  const configured = ((window.__RADIANT_CONFIG__?.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL) || "").trim();
   if (configured) {
     try {
       const parsed = new URL(configured);
@@ -37,7 +37,7 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || "";
+const ADMIN_TOKEN = (window.__RADIANT_CONFIG__?.VITE_ADMIN_TOKEN ?? import.meta.env.VITE_ADMIN_TOKEN) || "";
 
 function getAuthToken() {
   // Try JWT token first (new auth system)
